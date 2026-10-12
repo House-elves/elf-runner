@@ -1,0 +1,17 @@
+[Unit]
+Description=Elf Desk runner (agents, gh writes, mvnpm checks)
+Wants=network-online.target
+After=network-online.target elf-desk.service
+
+[Service]
+Type=simple
+# claude, gh, git, mvnpm-dependabot, bwrap: the same PATH a login shell has.
+Environment=PATH=%h/.local/bin:%h/.jbang/bin:%h/.sdkman/candidates/jbang/current/bin:%h/.sdkman/candidates/java/current/bin:%h/.sdkman/candidates/maven/current/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.sdkman/candidates/java/current/bin/java -Xmx256m -jar %h/.local/share/elf-runner/bin/elf-runner.jar
+Restart=on-failure
+RestartSec=10
+# Agents run as child processes: stopping the runner stops them too.
+KillMode=control-group
+
+[Install]
+WantedBy=default.target
