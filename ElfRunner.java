@@ -48,7 +48,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.15.0"; // 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.16.0"; // 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -874,6 +874,7 @@ public class ElfRunner {
             String[] ls = stat.split("\n");
             if (ls.length > 40) stat = String.join("\n", Arrays.copyOfRange(ls, 0, 30)) + "\n ...\n" + ls[ls.length - 1];
             git.put("diffstat", stat);
+            putPatch(git, wt, mb, squash);
         } catch (Exception e) {
             log("Couldn't squash: " + rootMessage(e));
             git.put("error", "Couldn't squash the PR into one commit: " + rootMessage(e));
@@ -953,6 +954,19 @@ public class ElfRunner {
         return out;
     }
 
+    static final int MAX_PATCH = 400_000;
+
+    /** The change itself, for you to read in the desk before it's pushed: {patch, patchCut} (cut at MAX_PATCH). */
+    void putPatch(ObjectNode git, Path wt, String from, String to) {
+        try {
+            String patch = gitOut(wt, "diff", "--no-color", "--no-ext-diff", "-M", from, to);
+            git.put("patch", patch.length() <= MAX_PATCH ? patch : patch.substring(0, MAX_PATCH));
+            git.put("patchCut", patch.length() > MAX_PATCH);
+        } catch (Exception e) {
+            log("Couldn't read the diff: " + rootMessage(e));
+        }
+    }
+
     /** What the agent committed in the worktree: {from, to, commits: [{sha, subject}], diffstat}. */
     ObjectNode commitsSince(Path wt, String from) {
         ObjectNode git = JSON.createObjectNode().put("from", from);
@@ -973,6 +987,7 @@ public class ElfRunner {
                     stat = String.join("\n", Arrays.copyOfRange(lines, 0, 30)) + "\n ...\n" + lines[lines.length - 1];
                 }
                 git.put("diffstat", stat);
+                putPatch(git, wt, from, to);
             }
         } catch (Exception e) {
             log("Couldn't read the worktree's commits: " + rootMessage(e));
