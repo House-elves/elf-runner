@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.20.0"; // 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.21.0"; // 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -719,9 +719,9 @@ public class ElfRunner {
                     || (ISSUES.matcher(path).matches() && body.size() == 2 && body.path("title").isTextual()
                             && !body.path("title").asText().isBlank() && body.path("body").isTextual())
                     || ((RERUN.matcher(path).matches() || APPROVE.matcher(path).matches()) && body.isEmpty())
-                    // A draft PR from your own fork's branch: title, body, head, base and draft (always true), nothing
-                    // else. You read the change on GitHub before it's marked ready for review (github.ready).
-                    || (PULLS.matcher(path).matches() && body.size() == 5 && body.path("draft").asBoolean(false)
+                    // A PR from your own fork's branch: title, body, head, base and draft (true, or false to open it
+                    // ready for review), nothing else. You read the change in the desk before you click.
+                    || (PULLS.matcher(path).matches() && body.size() == 5 && body.path("draft").isBoolean()
                             && body.path("title").isTextual()
                             && !body.path("title").asText().isBlank() && body.path("body").isTextual()
                             && BRANCH.matcher(body.path("base").asText()).matches()
