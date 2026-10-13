@@ -4,6 +4,7 @@
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.URI;
@@ -52,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.18.0"; // 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.19.0"; // 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -263,7 +264,11 @@ public class ElfRunner {
             watchdog.interrupt();
         }
         int exit = p.waitFor();
-        sanitizeItem(checkout.path("repo").asText(), wt); // before the runner's own git reads the agent's commits
+        // Before the runner's own git reads the agent's commits: its git files reset, and origin/* back to what the
+        // cache says (the agent could move them to make the diff you review leave something out).
+        sanitizeItem(checkout.path("repo").asText(), wt);
+        fetchFromCache(wt, cacheDir(checkout.path("repo").asText()),
+                checkout.path("kind").asText().equals("PR") ? checkout.path("number").asInt() : 0);
         if (!running.containsKey(job)) return; // cancelled
         if (result == null || result.path("is_error").asBoolean() || !result.path("structured_output").isObject()) {
             String why = result == null ? "Claude Code exited with code " + exit
@@ -757,7 +762,9 @@ public class ElfRunner {
 
     /** Null when the text is safe to show the agent, otherwise why not. Runs with no tools in an empty directory. */
     String triage(String text) throws Exception {
-        Path empty = Files.createTempDirectory(cfg.workDir.resolve("tmp"), "triage");
+        // Its own empty dir under triage/, which no agent's sandbox mounts (tmp/ is shared by them).
+        Files.createDirectories(cfg.workDir.resolve("triage"));
+        Path empty = Files.createTempDirectory(cfg.workDir.resolve("triage"), "triage");
         try {
             List<String> cmd = List.of(cfg.claude, "-p", "--output-format", "json", "--json-schema", TRIAGE_SCHEMA,
                     "--strict-mcp-config", "--mcp-config", cfg.mcpConfig.toString(), "--model", cfg.triageModel,
@@ -905,6 +912,18 @@ public class ElfRunner {
             throw new IllegalStateException("The clone of " + repo + " for this item had been changed from inside the"
                     + " sandbox, so it was removed. Run the action again to start from a fresh clone.");
         }
+        // No symlink anywhere in the git dir: the runner's git writes refs, logs and the index there, and would write
+        // through one to wherever it points.
+        boolean linked;
+        try (var all = Files.walk(gitDir)) {
+            linked = all.anyMatch(Files::isSymbolicLink);
+        }
+        if (linked) {
+            log("The clone " + wt.getFileName() + " has a symlink in its git dir; removing it");
+            removeNoFollow(wt);
+            throw new IllegalStateException("The clone of " + repo + " for this item had been changed from inside the"
+                    + " sandbox, so it was removed. Run the action again to start from a fresh clone.");
+        }
         resetItemGitDir(repo, gitDir);
     }
 
@@ -919,8 +938,8 @@ public class ElfRunner {
         for (String d : List.of("info", "objects/info")) {
             if (Files.isSymbolicLink(gitDir.resolve(d))) Files.delete(gitDir.resolve(d));
         }
-        for (String f : List.of("commondir", "config.worktree", "info/attributes", "info/grafts",
-                "objects/info/http-alternates", "hooks")) {
+        for (String f : List.of("commondir", "config.worktree", "info/attributes", "info/grafts", "shallow",
+                "refs/replace", "objects/info/http-alternates", "hooks")) {
             removeNoFollow(gitDir.resolve(f));
         }
         Files.createDirectories(gitDir.resolve("hooks"));
@@ -1332,6 +1351,16 @@ public class ElfRunner {
                 }
             } else {
                 gitOut(wt, "merge-base", "--is-ancestor", from, to);
+                // What you reviewed is from..to, so `from` must be what's really there: the PR's head on GitHub as the
+                // runner last saw it, or (a new PR from an issue) a commit of the repo's default branch in the cache.
+                Path head = headFile(wt);
+                if (Files.exists(head, LinkOption.NOFOLLOW_LINKS)) {
+                    if (!Files.readString(head).strip().equals(from)) {
+                        throw new IllegalStateException("Refused: the commits weren't made on the PR's head as it is on GitHub");
+                    }
+                } else if (!gitQuiet(cacheDir(repo), "merge-base", "--is-ancestor", from, "HEAD")) {
+                    throw new IllegalStateException("Refused: the commit isn't on " + repo + "'s default branch");
+                }
             }
             if (cfg.githubUser == null) throw new IllegalStateException("Set GITHUB_USER in the runner's config");
             List<String> cmd = new ArrayList<>(List.of("git", "-c", "credential.helper=",
@@ -1421,6 +1450,7 @@ public class ElfRunner {
         env.put("GH_CONFIG_DIR", cfg.workDir.resolve("gh-empty").toString());
         env.put("GIT_CONFIG_GLOBAL", cfg.workDir.resolve("gitconfig").toString());
         env.put("GIT_CONFIG_NOSYSTEM", "1");
+        env.put("GIT_NO_REPLACE_OBJECTS", "1"); // refs/replace could make git show one thing and push another
         env.put("GIT_TERMINAL_PROMPT", "0");
         env.put("GCM_INTERACTIVE", "never");
         env.put("GIT_SSH_COMMAND", "false");
@@ -1495,6 +1525,38 @@ public class ElfRunner {
      * the user can, so it reopens the hole.
      */
     static class Sandbox {
+
+        /**
+         * The Claude config dir is shared by every run, so: each run sees only its own sessions (projects/<its dir>),
+         * gets fresh shell snapshots and session state, and can't change what other runs load (CLAUDE.md, settings,
+         * agents, commands, skills, plugins, output styles), which could otherwise steer every later agent and the
+         * prompt-injection check.
+         */
+        static List<String> claudeIsolation(Config cfg, Path cwd) {
+            Path c = cfg.claudeConfigDir;
+            List<String> b = new ArrayList<>();
+            try {
+                Path own = c.resolve("projects").resolve(cwd.toString().replaceAll("[^A-Za-z0-9]", "-"));
+                Files.createDirectories(own);
+                b.addAll(List.of("--tmpfs", c.resolve("projects").toString(), "--bind", own.toString(), own.toString()));
+                for (String d : List.of("shell-snapshots", "session-env", "sessions")) {
+                    b.addAll(List.of("--tmpfs", c.resolve(d).toString()));
+                }
+                for (String f : List.of("CLAUDE.md", "settings.json", "settings.local.json")) {
+                    Path p = c.resolve(f);
+                    if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) Files.writeString(p, f.endsWith(".json") ? "{}\n" : "");
+                    b.addAll(List.of("--ro-bind", p.toString(), p.toString()));
+                }
+                for (String d : List.of("agents", "commands", "skills", "plugins", "output-styles", "hooks")) {
+                    Files.createDirectories(c.resolve(d));
+                    b.addAll(List.of("--ro-bind", c.resolve(d).toString(), c.resolve(d).toString()));
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            return b;
+        }
+
         static List<String> wrap(Config cfg, List<String> cmd, Path cwd) {
             String home = System.getProperty("user.home");
             String runtime = System.getenv().getOrDefault("XDG_RUNTIME_DIR", "/run/user/" + uid());
@@ -1517,11 +1579,15 @@ public class ElfRunner {
                     "--bind", cfg.claudeConfigDir.toString(), cfg.claudeConfigDir.toString(),
                     // Item clones borrow objects from the cache: readable, never writable, from the sandbox.
                     "--ro-bind", w.resolve("cache").toString(), w.resolve("cache").toString(),
-                    "--bind", w.resolve("worktrees").toString(), w.resolve("worktrees").toString(),
                     "--bind", w.resolve("tmp").toString(), w.resolve("tmp").toString(),
                     "--ro-bind", w.resolve("gitconfig").toString(), w.resolve("gitconfig").toString(),
                     "--ro-bind", w.resolve("gh-empty").toString(), w.resolve("gh-empty").toString(),
                     "--ro-bind", cfg.mcpConfig.toString(), cfg.mcpConfig.toString()));
+            // Only this run's own directory (its item's clone, or the triage dir): never another item's clone.
+            if (cwd.startsWith(w.resolve("worktrees")) || cwd.startsWith(w.resolve("triage"))) {
+                b.addAll(List.of("--bind", cwd.toString(), cwd.toString()));
+            }
+            b.addAll(claudeIsolation(cfg, cwd));
             String sdk = home + "/.sdkman/candidates";
             b.addAll(List.of("--clearenv",
                     "--setenv", "HOME", home,
