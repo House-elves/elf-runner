@@ -9,11 +9,13 @@ It dials out to the desk over a WebSocket (nothing connects in) and authenticate
 3. runs Claude Code headless (`claude -p --output-format stream-json --json-schema …`), resuming the thread's session for follow-ups;
 4. streams what the agent is doing back to the desk, then returns its structured answer (a reply, plus an optional draft review or comment).
 
-It also carries out the desk's GitHub writes. When you confirm a post or a close in the desk, the desk sends the exact request (`github.write`), and the runner process sends it with `gh auth token -u $GITHUB_USER`. That's the same "GitHub CLI" app Claude Code uses, so orgs that restrict OAuth Apps accept it. Only these requests are accepted: post a review (`POST /repos/o/r/pulls/N/reviews`), post a comment (`POST /repos/o/r/issues/N/comments`), open an issue (`POST /repos/o/r/issues` with exactly `title` and `body`; the desk checks the repo is public first), close or reopen (`PATCH /repos/o/r/issues/N` with exactly `{"state":"closed"}` or `{"state":"open"}`; reopening is how the desk re-runs CI on your own PR in a repo where you can't re-run workflows), merge (`PUT /repos/o/r/pulls/N/merge` with exactly `merge_method` and a 40-character `sha`, so a merge can't pick up commits pushed after you clicked), re-run failed jobs (`POST /repos/o/r/actions/runs/N/rerun-failed-jobs`, empty body), and approve a fork PR's waiting workflow runs (`POST /repos/o/r/actions/runs/N/approve`, empty body).
+It also carries out the desk's GitHub writes. When you confirm a post or a close in the desk, the desk sends the exact request (`github.write`), and the runner process sends it with `gh auth token -u $GITHUB_USER`. That's the same "GitHub CLI" app Claude Code uses, so orgs that restrict OAuth Apps accept it. Only these requests are accepted: post a review (`POST /repos/o/r/pulls/N/reviews`), post a comment (`POST /repos/o/r/issues/N/comments`), open an issue (`POST /repos/o/r/issues` with exactly `title` and `body`; the desk checks the repo is public first), close or reopen (`PATCH /repos/o/r/issues/N` with exactly `{"state":"closed"}` or `{"state":"open"}`; reopening is how the desk re-runs CI on your own PR in a repo where you can't re-run workflows), merge (`PUT /repos/o/r/pulls/N/merge` with exactly `merge_method` and a 40-character `sha`, so a merge can't pick up commits pushed after you clicked), re-run failed jobs (`POST /repos/o/r/actions/runs/N/rerun-failed-jobs`, empty body), approve a fork PR's waiting workflow runs (`POST /repos/o/r/actions/runs/N/approve`, empty body), open a PR from your own fork (`POST /repos/o/r/pulls` with exactly `title`, `body`, `base` and a `head` of `$GITHUB_USER:branch`), and sync your own fork's branch with its upstream (`POST /repos/$GITHUB_USER/r/merge-upstream` with exactly `branch`). For an issue, the agent's commits are squashed into one on the default branch when its job ends, ready to become a PR.
 
 It also updates a PR that's behind its base (`github.updateBranch`): one GraphQL mutation, `updatePullRequestBranch`, built by the runner with only the PR, the expected head commit and REBASE or MERGE, so GitHub does the update and refuses it if the PR moved.
 
 It also starts mvnpm-dependabot when you ask from the desk (`mvnpm.run`): `systemctl --user start mvnpm-dependabot.service` for a full round (the elf's own unit), or a one-off `systemd-run` unit `mvnpm-dependabot-pr-<owner>-<repo>-<n>` running `mvnpm-dependabot --repo R --pr N`. It reports which checks are running (`mvnpm.state`) until they finish, so the desk can show progress and refresh. The elf does its own commenting and approving, as before.
+
+It runs daily-triage when you ask from the desk (`triage.run`), in one of two fixed modes and with nothing else passed: `email` (`daily-triage --triage-only --no-email`: the email triage, saved for the desk instead of emailed) and `zulip` (`daily-triage --zulip-only`: the last day of Zulip with a digest per topic, marking nothing read). Each runs as a `systemd-run` unit `daily-triage-desk-<mode>`; the runner reports which run and, for a failed one, the end of its log (`triage.state`). The desk reads the saved runs from `~/.config/daily-triage/runs`.
 
 It also pushes the agent's commits when you confirm a push in the desk (`git.push`). It pushes the PR's worktree HEAD to exactly the branch the desk names. The worktree must be at the commit you saw, that commit must descend from the branch's head when the agent started, and the push is plain fast-forward, so if the branch moved on GitHub nothing is pushed. The token reaches git through a credential helper for that one command. The agent only commits locally (`git commit`); it never pushes. The token is read fresh for each write, and never stored, logged, or passed to the agent.
 
@@ -44,7 +46,7 @@ jbang ElfRunner.java --sandbox-shell bash
 1. **Config.** Create `~/.config/elf-runner/config` (mode 600):
 
    ```
-   DESK_URL=ws://localhost:7480/runner
+   DESK_URL=ws://localhost:7777/runner
    RUNNER_TOKEN=<same value as ELFDESK_RUNNER_TOKEN in the desk's .env>
    ```
 
@@ -69,7 +71,7 @@ jbang ElfRunner.java --sandbox-shell bash
 
 | Key | Default | |
 |---|---|---|
-| `DESK_URL` | `ws://localhost:7480/runner` | |
+| `DESK_URL` | `ws://localhost:7777/runner` | |
 | `RUNNER_TOKEN` | required | Shared with the desk |
 | `WORK_DIR` | `~/.local/share/elf-runner` | Clones, worktrees, private `.m2`, Claude config |
 | `MAX_JOBS` | `2` | Jobs at once; more wait for a slot |

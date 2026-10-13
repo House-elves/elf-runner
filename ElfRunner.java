@@ -48,7 +48,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.11.0"; // 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.14.0"; // 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -97,6 +97,7 @@ public class ElfRunner {
                 send(hello);
                 log("Connected to " + cfg.deskUrl);
                 sendMvnpmState();
+                sendTriageState();
                 backoff = 1;
                 closed.await();
                 log("Disconnected from the desk");
@@ -165,6 +166,7 @@ public class ElfRunner {
                 case "git.squash" -> gitSquash(msg);
                 case "github.updateBranch" -> updateBranch(msg);
                 case "mvnpm.run" -> mvnpmRun(msg);
+                case "triage.run" -> triageRun(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -266,8 +268,8 @@ public class ElfRunner {
                 .put("session", result.path("session_id").asText(null));
         done.set("output", output);
         boolean pr = checkout.path("kind").asText().equals("PR");
-        done.set("git", pr && !gitOut(wt, "rev-parse", "HEAD").equals(startSha)
-                ? squashed(wt, checkout) : commitsSince(wt, startSha));
+        done.set("git", !pr ? issueCommits(wt)
+                : !gitOut(wt, "rev-parse", "HEAD").equals(startSha) ? squashed(wt, checkout) : commitsSince(wt, startSha));
         if (result.path("total_cost_usd").isNumber()) done.put("cost", result.path("total_cost_usd").asDouble());
         send(done);
         log("Job " + job + " done");
@@ -339,6 +341,8 @@ public class ElfRunner {
     static final Pattern APPROVE = Pattern.compile(REPO + "/actions/runs/\\d+/approve");
     static final Pattern ASSIGNEES = Pattern.compile(REPO + "/issues/\\d+/assignees");
     static final Pattern ISSUES = Pattern.compile(REPO + "/issues");
+    static final Pattern PULLS = Pattern.compile(REPO + "/pulls");
+    static final Pattern MERGE_UPSTREAM = Pattern.compile(REPO + "/merge-upstream");
     static final Pattern REPO_NAME = Pattern.compile("[A-Za-z0-9-]+/[A-Za-z0-9._-]+");
     static final Pattern BRANCH = Pattern.compile("[A-Za-z0-9._/-]{1,250}");
     static final Pattern SHA = Pattern.compile("[0-9a-f]{40}");
@@ -348,7 +352,7 @@ public class ElfRunner {
      * Sends one write the desk asks for, with this machine's gh login for GITHUB_USER: the "GitHub CLI" app that
      * orgs already approve, the same as Claude Code. The desk only asks after you confirm in the page. Only the
      * requests in {@link #allowedWrite} are accepted (reviews, comments, new issues, close/reopen, assign yourself,
-     * merges pinned to a head, CI re-runs and approvals). This runs in the runner
+     * merges pinned to a head, CI re-runs and approvals, PRs from your fork and syncing that fork). This runs in the runner
      * process, never in the agent's sandbox.
      */
     void githubWrite(JsonNode msg) {
@@ -359,7 +363,7 @@ public class ElfRunner {
         ObjectNode result = JSON.createObjectNode().put("type", "github.result").put("id", id);
         try {
             if (!allowedWrite(method, path, body, cfg.githubUser)) {
-                throw new IllegalArgumentException("The runner only posts reviews, comments and new issues, closes items and merges PRs; refused "
+                throw new IllegalArgumentException("The runner only posts reviews, comments, new issues and PRs, closes items and merges PRs; refused "
                         + method + " " + path);
             }
             if (cfg.githubUser == null) throw new IllegalStateException("Set GITHUB_USER in the runner's config");
@@ -425,6 +429,127 @@ public class ElfRunner {
             result.put("status", 0).put("error", rootMessage(e));
         }
         send(result);
+    }
+
+    // ---- daily-triage runs, for the desk ----
+
+    /** What the desk may ask daily-triage for, and the arguments each run gets: nothing else is ever passed. */
+    static final Map<String, List<String>> TRIAGE_MODES = Map.of(
+            "email", List.of("--triage-only", "--no-email"), // the email triage, shown in the desk, not emailed
+            "zulip", List.of("--zulip-only")); // the last day of Zulip with a digest per topic; marks nothing read
+    static final String TRIAGE_UNIT = "daily-triage-desk-";
+    final Object triageWatch = new Object();
+    volatile boolean triageWatching;
+
+    /**
+     * Starts daily-triage as a systemd user unit, {@code daily-triage-desk-<mode>}. The elf saves the run under
+     * ~/.config/daily-triage/runs, where the desk reads it. The unit isn't collected, so a failed run stays failed
+     * (and its log readable) until the next run of that mode.
+     */
+    void triageRun(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
+        try {
+            String mode = msg.path("mode").asText("");
+            List<String> args = TRIAGE_MODES.get(mode);
+            if (args == null) throw new IllegalArgumentException("Bad daily-triage mode");
+            if (triageRunning().contains(mode)) throw new IllegalStateException("It's already running; wait for it to finish");
+            Path elf = which("daily-triage");
+            if (elf == null) throw new IllegalStateException("daily-triage isn't on the runner's PATH");
+            String unit = TRIAGE_UNIT + mode;
+            new ProcessBuilder("systemctl", "--user", "reset-failed", unit).start().waitFor(10, TimeUnit.SECONDS);
+            List<String> cmd = new ArrayList<>(List.of("systemd-run", "--user", "--unit=" + unit,
+                    "--description=daily-triage " + mode + " for Elf Desk", "--property=Nice=10",
+                    "--property=TimeoutStartSec=3h", "--setenv=PATH=" + System.getenv("PATH"), elf.toString()));
+            cmd.addAll(args);
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) {
+                throw new IOException("Couldn't start daily-triage: " + clip(out, 300));
+            }
+            log("Started daily-triage " + mode);
+            result.put("status", 200).put("body", "{}");
+            watchTriage();
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    /** The modes running now. */
+    static List<String> triageRunning() {
+        List<String> modes = new ArrayList<>();
+        for (String unit : units("--state=activating,active", TRIAGE_UNIT + "*")) {
+            modes.add(unit.substring(TRIAGE_UNIT.length(), unit.length() - ".service".length()));
+        }
+        return modes;
+    }
+
+    /** systemd user units matching a pattern, in the given states. */
+    static List<String> units(String state, String pattern) {
+        try {
+            Process p = new ProcessBuilder("systemctl", "--user", "list-units", "--all", state, "--no-legend", "--plain",
+                    pattern).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor(10, TimeUnit.SECONDS);
+            List<String> units = new ArrayList<>();
+            for (String line : out.split("\n")) {
+                String unit = line.strip().split("\\s+")[0];
+                if (unit.endsWith(".service")) units.add(unit);
+            }
+            return units;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** Which modes run, and for each mode whose last run failed, the end of its log. */
+    void sendTriageState() {
+        List<String> running = triageRunning();
+        ObjectNode msg = JSON.createObjectNode().put("type", "triage.state");
+        var arr = msg.putArray("running");
+        running.forEach(arr::add);
+        ObjectNode failed = msg.putObject("failed");
+        for (String unit : units("--state=failed", TRIAGE_UNIT + "*")) {
+            String mode = unit.substring(TRIAGE_UNIT.length(), unit.length() - ".service".length());
+            failed.put(mode, journalTail(unit));
+        }
+        send(msg);
+        if (!running.isEmpty()) watchTriage();
+    }
+
+    static String journalTail(String unit) {
+        try {
+            Process p = new ProcessBuilder("journalctl", "--user", "-u", unit, "-n", "15", "--no-pager", "-o", "cat")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            p.waitFor(10, TimeUnit.SECONDS);
+            return clip(out, 2000);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Reports the runs every 5 seconds until none run, then once more (the desk reads the saved run then). */
+    void watchTriage() {
+        synchronized (triageWatch) {
+            if (triageWatching) return;
+            triageWatching = true;
+        }
+        Thread.ofVirtual().start(() -> {
+            try {
+                List<String> last = null;
+                while (true) {
+                    Thread.sleep(Duration.ofSeconds(last == null ? 2 : 5));
+                    List<String> now = triageRunning();
+                    if (!now.equals(last)) sendTriageState();
+                    if (now.isEmpty()) break;
+                    last = now;
+                }
+            } catch (InterruptedException ignored) {
+            } finally {
+                triageWatching = false;
+            }
+        });
     }
 
     /** Active mvnpm-dependabot units: the elf's service and one-off PR checks. */
@@ -537,6 +662,16 @@ public class ElfRunner {
                     || (ISSUES.matcher(path).matches() && body.size() == 2 && body.path("title").isTextual()
                             && !body.path("title").asText().isBlank() && body.path("body").isTextual())
                     || ((RERUN.matcher(path).matches() || APPROVE.matcher(path).matches()) && body.isEmpty())
+                    // A PR from your own fork's branch: title, body, head and base, nothing else.
+                    || (PULLS.matcher(path).matches() && body.size() == 4 && body.path("title").isTextual()
+                            && !body.path("title").asText().isBlank() && body.path("body").isTextual()
+                            && BRANCH.matcher(body.path("base").asText()).matches()
+                            && self != null && body.path("head").asText().startsWith(self + ":")
+                            && BRANCH.matcher(body.path("head").asText().substring(self.length() + 1)).matches())
+                    // Bring your own fork's branch up to date with its upstream (so a push sends only the new commit).
+                    || (MERGE_UPSTREAM.matcher(path).matches() && self != null
+                            && path.split("/")[2].equalsIgnoreCase(self) && body.size() == 1
+                            && BRANCH.matcher(body.path("branch").asText()).matches())
                     // Assign yourself, and only yourself.
                     || (ASSIGNEES.matcher(path).matches() && body.size() == 1 && body.path("assignees").size() == 1
                             && self != null && self.equalsIgnoreCase(body.path("assignees").path(0).asText()));
@@ -699,6 +834,30 @@ public class ElfRunner {
             git.put("error", "Couldn't squash the PR into one commit: " + rootMessage(e));
         }
         return git;
+    }
+
+    /**
+     * An issue's worktree: what the agent committed on top of the default branch, as one commit (squashed here when
+     * there are more), for a new PR. {from: the default branch commit, to, base: its name, commits, diffstat}.
+     */
+    ObjectNode issueCommits(Path wt) {
+        try {
+            String head = gitOut(wt, "rev-parse", "HEAD");
+            String base = gitOut(wt, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replaceFirst("^origin/", "");
+            String mb = gitOut(wt, "merge-base", head, "refs/remotes/origin/HEAD");
+            List<String> own = lines(gitOut(wt, "rev-list", "--reverse", head, "^" + mb));
+            if (own.size() > 1) {
+                String message = gitOut(wt, "log", "-1", "--format=%B", own.get(0));
+                List<String> who = lines(gitOut(wt, "log", "-1", "--format=%an%n%ae%n%aI", own.get(0)));
+                String squash = gitIn(wt, message, Map.of("GIT_AUTHOR_NAME", who.get(0), "GIT_AUTHOR_EMAIL", who.get(1),
+                        "GIT_AUTHOR_DATE", who.get(2)), "commit-tree", head + "^{tree}", "-p", mb, "-F", "-");
+                git(wt, "checkout", "--detach", squash);
+            }
+            return commitsSince(wt, mb).put("base", base);
+        } catch (Exception e) {
+            log("Couldn't read the issue worktree's commits: " + rootMessage(e));
+            return JSON.createObjectNode().put("error", "Couldn't read the agent's commits: " + rootMessage(e));
+        }
     }
 
     /** "Squash into one commit" without an agent: resets the PR's worktree to its head and squashes it. */
@@ -1078,7 +1237,7 @@ public class ElfRunner {
             }
             String home = System.getProperty("user.home");
             Config c = new Config();
-            c.deskUrl = raw.getOrDefault("DESK_URL", "ws://localhost:7480/runner");
+            c.deskUrl = raw.getOrDefault("DESK_URL", "ws://localhost:7777/runner");
             c.token = raw.getOrDefault("RUNNER_TOKEN", "");
             c.workDir = Path.of(raw.getOrDefault("WORK_DIR", home + "/.local/share/elf-runner"));
             c.maxJobs = Integer.parseInt(raw.getOrDefault("MAX_JOBS", "2"));
