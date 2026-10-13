@@ -48,7 +48,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.14.0"; // 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.15.0"; // 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -165,6 +165,7 @@ public class ElfRunner {
                 case "git.push" -> gitPush(msg);
                 case "git.squash" -> gitSquash(msg);
                 case "github.updateBranch" -> updateBranch(msg);
+                case "github.ready" -> readyForReview(msg);
                 case "mvnpm.run" -> mvnpmRun(msg);
                 case "triage.run" -> triageRun(msg);
                 default -> { }
@@ -644,6 +645,48 @@ public class ElfRunner {
         send(result);
     }
 
+    /** Marks your own draft PR ready for review (GitHub only does this through GraphQL). Nobody else's PR. */
+    void readyForReview(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "github.result").put("id", msg.path("id").asText());
+        String repo = msg.path("repo").asText();
+        int number = msg.path("number").asInt();
+        try {
+            if (!REPO_NAME.matcher(repo).matches() || number <= 0) {
+                throw new IllegalArgumentException("Refused ready for review with unexpected parameters");
+            }
+            if (cfg.githubUser == null) throw new IllegalStateException("Set GITHUB_USER in the runner's config");
+            String token = ghToken(cfg.githubUser);
+            String[] r = repo.split("/", 2);
+            ObjectNode find = JSON.createObjectNode().put("query", "query($o: String!, $n: String!, $p: Int!) { "
+                    + "repository(owner: $o, name: $n) { pullRequest(number: $p) { id isDraft author { login } } } }");
+            find.putObject("variables").put("o", r[0]).put("n", r[1]).put("p", number);
+            JsonNode pr = JSON.readTree(graphql(token, find)).path("data").path("repository").path("pullRequest");
+            if (pr.path("id").asText(null) == null) throw new IllegalStateException("No pull request " + repo + "#" + number);
+            if (!cfg.githubUser.equalsIgnoreCase(pr.path("author").path("login").asText())) {
+                throw new IllegalArgumentException("Refused: " + repo + "#" + number + " isn't your PR");
+            }
+            if (!pr.path("isDraft").asBoolean()) {
+                result.put("status", 200).put("body", "{}");
+                send(result);
+                return;
+            }
+            ObjectNode ready = JSON.createObjectNode().put("query", "mutation($id: ID!) { "
+                    + "markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }");
+            ready.putObject("variables").put("id", pr.path("id").asText());
+            JsonNode done = JSON.readTree(graphql(token, ready));
+            if (done.path("errors").isArray() && !done.path("errors").isEmpty()) {
+                String why = done.path("errors").path(0).path("message").asText("GitHub refused it");
+                result.put("status", 422).put("body", JSON.createObjectNode().put("message", why).toString());
+            } else {
+                log("Marked " + repo + "#" + number + " ready for review as " + cfg.githubUser);
+                result.put("status", 200).put("body", "{}");
+            }
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
     static String graphql(String token, ObjectNode body) throws Exception {
         HttpResponse<String> r = GITHUB.send(HttpRequest.newBuilder(URI.create("https://api.github.com/graphql"))
                 .timeout(Duration.ofSeconds(60))
@@ -662,8 +705,10 @@ public class ElfRunner {
                     || (ISSUES.matcher(path).matches() && body.size() == 2 && body.path("title").isTextual()
                             && !body.path("title").asText().isBlank() && body.path("body").isTextual())
                     || ((RERUN.matcher(path).matches() || APPROVE.matcher(path).matches()) && body.isEmpty())
-                    // A PR from your own fork's branch: title, body, head and base, nothing else.
-                    || (PULLS.matcher(path).matches() && body.size() == 4 && body.path("title").isTextual()
+                    // A draft PR from your own fork's branch: title, body, head, base and draft (always true), nothing
+                    // else. You read the change on GitHub before it's marked ready for review (github.ready).
+                    || (PULLS.matcher(path).matches() && body.size() == 5 && body.path("draft").asBoolean(false)
+                            && body.path("title").isTextual()
                             && !body.path("title").asText().isBlank() && body.path("body").isTextual()
                             && BRANCH.matcher(body.path("base").asText()).matches()
                             && self != null && body.path("head").asText().startsWith(self + ":")
