@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -51,7 +52,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.17.0"; // 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.18.0"; // 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -78,6 +79,7 @@ public class ElfRunner {
         if (cfg.sandbox) log("Agents run in a bubblewrap sandbox" + (cfg.sandboxPodman ? " with Podman" : ""));
         else log("WARNING: SANDBOX=none - agents can reach your GitHub credentials");
         ElfRunner runner = new ElfRunner(cfg);
+        runner.migrateToItemClones();
         runner.checkLogin();
         runner.run();
     }
@@ -189,9 +191,12 @@ public class ElfRunner {
                 event(job, "Waiting for a free slot (" + cfg.maxJobs + " jobs at a time)…");
                 slots.acquire();
             }
+            ReentrantLock item = itemLock(msg.path("checkout"));
+            item.lock(); // one job, push or squash on an item at a time
             try {
                 runJob(job, msg);
             } finally {
+                item.unlock();
                 slots.release();
             }
         } catch (Exception e) {
@@ -258,7 +263,7 @@ public class ElfRunner {
             watchdog.interrupt();
         }
         int exit = p.waitFor();
-        sanitize(checkout.path("repo").asText()); // before the runner's own git reads the agent's commits
+        sanitizeItem(checkout.path("repo").asText(), wt); // before the runner's own git reads the agent's commits
         if (!running.containsKey(job)) return; // cancelled
         if (result == null || result.path("is_error").asBoolean() || !result.path("structured_output").isObject()) {
             String why = result == null ? "Claude Code exited with code " + exit
@@ -799,36 +804,196 @@ public class ElfRunner {
         String repo = checkout.path("repo").asText();
         int number = checkout.path("number").asInt();
         boolean pr = checkout.path("kind").asText().equals("PR");
-        if (!repo.matches("[A-Za-z0-9-]+/[A-Za-z0-9._-]+")) throw new IllegalArgumentException("Bad repo " + repo);
+        if (!REPO_NAME.matcher(repo).matches() || number <= 0) throw new IllegalArgumentException("Bad item " + repo + "#" + number);
 
-        Path clone = cfg.workDir.resolve("repos").resolve(repo);
-        Path wt = cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
-        sanitize(repo);
-        if (!Files.isDirectory(clone.resolve(".git")) && !Files.isRegularFile(clone.resolve("HEAD"))) {
-            event(job, "Cloning " + repo + " (first time only)…");
-            Files.createDirectories(clone.getParent());
-            git(null, "clone", "--filter=blob:none", "https://github.com/" + repo + ".git", clone.toString());
-        } else {
-            event(job, "Fetching " + repo + "…");
-            git(clone, "fetch", "--prune", "origin");
-        }
-        String target;
-        if (pr) {
-            git(clone, "fetch", "origin", "+pull/" + number + "/head:refs/remotes/origin/pr/" + number);
-            String base = checkout.path("base").asText("");
-            if (!base.isEmpty()) git(clone, "fetch", "origin", "+refs/heads/" + base + ":refs/remotes/origin/" + base);
-            target = "refs/remotes/origin/pr/" + number;
-        } else {
-            target = "refs/remotes/origin/HEAD";
-        }
-        if (!Files.isDirectory(wt)) {
-            Files.createDirectories(wt.getParent());
-            git(clone, "worktree", "add", "--detach", wt.toString(), target);
-        } else if (!keep) {
-            git(wt, "checkout", "--detach", "--force", target);
-        }
+        Path wt = itemDir(repo, number);
+        Path cache = cache(job, repo, pr ? number : 0);
+        sanitizeItem(repo, wt);
+        boolean fresh = !Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS);
+        if (fresh) initItem(repo, wt);
+        fetchFromCache(wt, cache, pr ? number : 0);
+        String target = pr ? "refs/remotes/origin/pr/" + number : "refs/remotes/origin/HEAD";
+        if (fresh || !keep) git(wt, "checkout", "-q", "--detach", "--force", target);
         if (pr && (!keep || !Files.exists(headFile(wt)))) replace(headFile(wt), gitOut(wt, "rev-parse", "HEAD"));
         return wt;
+    }
+
+    // ---- clones ----
+    // Every item (issue or PR) has its own clone, worktrees/<owner_repo_N>, which only that item's agent can write,
+    // and an item runs one job, push or squash at a time (itemLock). Their objects come from a cache per repo,
+    // cache/<owner>/<repo>.git (bare, blob:none), which only the runner writes and the sandbox sees read-only:
+    // item clones borrow its objects (alternates) and fetch from it, so nothing an agent does reaches another item.
+
+    final Map<String, ReentrantLock> itemLocks = new ConcurrentHashMap<>();
+    final Map<String, ReentrantLock> cacheLocks = new ConcurrentHashMap<>();
+
+    ReentrantLock itemLock(JsonNode checkout) {
+        return itemLocks.computeIfAbsent(checkout.path("repo").asText() + "#" + checkout.path("number").asInt(),
+                k -> new ReentrantLock());
+    }
+
+    /** For a push or squash: the item's lock, or a refusal while an agent works on it. */
+    ReentrantLock lockForGit(String repo, int number) {
+        ReentrantLock lock = itemLocks.computeIfAbsent(repo + "#" + number, k -> new ReentrantLock());
+        if (!lock.tryLock()) {
+            throw new IllegalStateException("An agent is working on " + repo + "#" + number + " right now. Try again when it's done.");
+        }
+        return lock;
+    }
+
+    Path itemDir(String repo, int number) {
+        return cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
+    }
+
+    Path cacheDir(String repo) {
+        return cfg.workDir.resolve("cache").resolve(repo + ".git");
+    }
+
+    /** The repo's cache, fetched up to date (cloned the first time), with a PR's head as refs/pull/N/head. */
+    Path cache(long job, String repo, int pr) throws Exception {
+        Path cache = cacheDir(repo);
+        ReentrantLock lock = cacheLocks.computeIfAbsent(repo, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            if (!Files.isDirectory(cache, LinkOption.NOFOLLOW_LINKS)) {
+                event(job, "Cloning " + repo + " (first time only)…");
+                Files.createDirectories(cache.getParent());
+                Path tmp = cache.resolveSibling(cache.getFileName() + ".new");
+                removeNoFollow(tmp);
+                git(null, "clone", "-q", "--bare", "--filter=blob:none", "https://github.com/" + repo + ".git", tmp.toString());
+                Files.move(tmp, cache);
+            } else {
+                event(job, "Fetching " + repo + "…");
+                git(cache, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/heads/*");
+            }
+            if (pr > 0) git(cache, "fetch", "-q", "origin", "+refs/pull/" + pr + "/head:refs/pull/" + pr + "/head");
+            return cache;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** A new, empty item clone: its own git dir, objects borrowed from the cache, missing blobs from GitHub. */
+    void initItem(String repo, Path wt) throws Exception {
+        Files.createDirectories(wt.getParent());
+        git(null, "init", "-q", wt.toString());
+        resetItemGitDir(repo, wt.resolve(".git"));
+    }
+
+    /** The cache's branches as origin/*, its default branch as origin/HEAD, and a PR's head as origin/pr/N. */
+    void fetchFromCache(Path wt, Path cache, int pr) throws Exception {
+        List<String> args = new ArrayList<>(List.of("fetch", "-q", "--no-tags", "--prune", cache.toString(),
+                "+refs/heads/*:refs/remotes/origin/*"));
+        if (pr > 0) args.add("+refs/pull/" + pr + "/head:refs/remotes/origin/pr/" + pr);
+        git(wt, args.toArray(String[]::new));
+        String defaultBranch = gitOut(cache, "symbolic-ref", "--short", "HEAD");
+        git(wt, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/" + defaultBranch);
+    }
+
+    /**
+     * The agent can write its item's clone, but the runner runs git there too (fetch, checkout, diff, push with your
+     * token). So before each use, everything git would run or obey is reset (see resetItemGitDir). Fails closed: a
+     * clone that isn't a real directory with a real .git directory (a symlink, a "gitdir:" file) is removed.
+     */
+    void sanitizeItem(String repo, Path wt) throws IOException {
+        if (!Files.exists(wt, LinkOption.NOFOLLOW_LINKS)) return;
+        Path gitDir = wt.resolve(".git");
+        if (!Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS) || !Files.isDirectory(gitDir, LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(gitDir.resolve("objects"))) {
+            log("The clone " + wt.getFileName() + " was tampered with; removing it");
+            removeNoFollow(wt);
+            throw new IllegalStateException("The clone of " + repo + " for this item had been changed from inside the"
+                    + " sandbox, so it was removed. Run the action again to start from a fresh clone.");
+        }
+        resetItemGitDir(repo, gitDir);
+    }
+
+    /**
+     * What git in an item clone runs or obeys, as the runner sets it: the config (no hooks path, fsmonitor, url
+     * rewrites, filters or diff drivers), no hooks, attributes, grafts or per-worktree config, and alternates only to
+     * the cache. Nothing here follows a symlink the agent may have planted.
+     */
+    void resetItemGitDir(String repo, Path gitDir) throws IOException {
+        if (Files.isSymbolicLink(gitDir.resolve("objects"))) throw new IllegalStateException("objects is a symlink");
+        // Symlinked directories first, so nothing below resolves through them.
+        for (String d : List.of("info", "objects/info")) {
+            if (Files.isSymbolicLink(gitDir.resolve(d))) Files.delete(gitDir.resolve(d));
+        }
+        for (String f : List.of("commondir", "config.worktree", "info/attributes", "info/grafts",
+                "objects/info/http-alternates", "hooks")) {
+            removeNoFollow(gitDir.resolve(f));
+        }
+        Files.createDirectories(gitDir.resolve("hooks"));
+        Files.createDirectories(gitDir.resolve("objects").resolve("info"));
+        replace(gitDir.resolve("objects").resolve("info").resolve("alternates"), cacheDir(repo).resolve("objects") + "\n");
+        replace(gitDir.resolve("config"), """
+                [core]
+                \trepositoryformatversion = 1
+                \tfilemode = true
+                \tbare = false
+                \tlogallrefupdates = true
+                [remote "origin"]
+                \turl = https://github.com/%s.git
+                \tfetch = +refs/heads/*:refs/remotes/origin/*
+                \tpromisor = true
+                \tpartialclonefilter = blob:none
+                """.formatted(repo));
+    }
+
+    /**
+     * One time, from the old layout (one clone per repo in repos/, shared by its items' worktrees and writable by
+     * every agent) to a clone per item: each worktree's current commit moves into a fresh item clone, then repos/
+     * goes. A worktree that can't be moved is removed (its item starts over on its next action).
+     */
+    void migrateToItemClones() throws IOException {
+        Path repos = cfg.workDir.resolve("repos");
+        if (!Files.exists(repos, LinkOption.NOFOLLOW_LINKS)) return;
+        Path worktrees = cfg.workDir.resolve("worktrees");
+        Path staging = cfg.workDir.resolve("staging");
+        removeNoFollow(staging);
+        Files.createDirectories(staging);
+        log("Moving worktrees to a clone per item (one time)…");
+        Set<String> reset = new java.util.HashSet<>();
+        try (var all = Files.list(worktrees)) {
+            for (Path wt : all.toList()) {
+                String name = wt.getFileName().toString();
+                if (Files.isDirectory(wt.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) continue; // already an item clone
+                try {
+                    String line = Files.readString(wt.resolve(".git")).strip();
+                    if (!line.startsWith("gitdir:")) throw new IllegalStateException("not a worktree");
+                    Path rel = repos.relativize(Path.of(line.substring(7).strip()).normalize());
+                    if (rel.getNameCount() != 5 || rel.startsWith("..") || !rel.getName(2).toString().equals(".git")) {
+                        throw new IllegalStateException("not a worktree of a clone in repos/");
+                    }
+                    String repo = rel.getName(0) + "/" + rel.getName(1);
+                    String prefix = repo.replace('/', '_') + "_";
+                    if (!REPO_NAME.matcher(repo).matches() || !isWorktreeOf(wt, prefix) || !rel.getName(4).toString().equals(name)) {
+                        throw new IllegalStateException("unexpected name");
+                    }
+                    int number = Integer.parseInt(name.substring(prefix.length()));
+                    // The old clone's git files, reset before the runner's git reads it: once per repo, before any of
+                    // its worktrees moves (the reset rewrites every worktree's link to it).
+                    if (reset.add(repo)) sanitize(repo);
+                    String head = gitOut(wt, "rev-parse", "HEAD");
+                    boolean pr = Files.exists(headFile(wt));
+                    Path cache = cache(0, repo, pr ? number : 0);
+                    Path item = staging.resolve(name);
+                    initItem(repo, item);
+                    fetchFromCache(item, cache, pr ? number : 0);
+                    git(item, "fetch", "-q", "--no-tags", wt.toString(), "HEAD"); // the agent's commits, if any
+                    git(item, "checkout", "-q", "--detach", "--force", head);
+                    removeNoFollow(wt);
+                    Files.move(item, wt);
+                    log("  " + name + ": own clone at " + head.substring(0, 7));
+                } catch (Exception e) {
+                    log("  " + name + ": couldn't move it (" + rootMessage(e) + "); removed");
+                    removeNoFollow(wt);
+                }
+            }
+        }
+        removeNoFollow(staging);
+        removeNoFollow(repos);
+        log("Done: repos/ is gone; every item has its own clone.");
     }
 
     /**
@@ -918,8 +1083,13 @@ public class ElfRunner {
         try {
             JsonNode checkout = msg.path("checkout");
             if (!checkout.path("kind").asText().equals("PR")) throw new IllegalArgumentException("Only PRs can be squashed");
-            Path wt = worktree(0, checkout, false);
-            ObjectNode git = squashed(wt, checkout);
+            ReentrantLock lock = lockForGit(checkout.path("repo").asText(), checkout.path("number").asInt());
+            ObjectNode git;
+            try {
+                git = squashed(worktree(0, checkout, false), checkout);
+            } finally {
+                lock.unlock();
+            }
             if (git.has("error")) result.put("status", 409).put("error", git.path("error").asText());
             else result.put("status", 200).put("body", git.toString());
         } catch (Exception e) {
@@ -948,15 +1118,20 @@ public class ElfRunner {
     String gitIn(Path dir, String stdin, Map<String, String> env, String... args) throws Exception {
         List<String> cmd = new ArrayList<>(List.of("git"));
         cmd.addAll(List.of(args));
-        ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile());
+        ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
         scrub(pb.environment());
         pb.environment().putAll(env);
         Process p = pb.start();
-        try (OutputStream in = p.getOutputStream()) {
-            in.write(stdin.getBytes(StandardCharsets.UTF_8));
-        }
+        // Written on its own thread: a big input and a big output would otherwise block each other.
+        Thread writer = Thread.ofVirtual().start(() -> {
+            try (OutputStream in = p.getOutputStream()) {
+                in.write(stdin.getBytes(StandardCharsets.UTF_8));
+            } catch (IOException ignored) {
+            }
+        });
         String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-        if (!p.waitFor(2, TimeUnit.MINUTES) || p.exitValue() != 0) throw new IOException("git " + args[0] + " failed");
+        writer.join();
+        if (!p.waitFor(15, TimeUnit.MINUTES) || p.exitValue() != 0) throw new IOException("git " + args[0] + " failed");
         return out;
     }
 
@@ -1131,15 +1306,17 @@ public class ElfRunner {
         String repo = msg.path("repo").asText(), headRepo = msg.path("headRepo").asText(),
                 headRef = msg.path("headRef").asText(), from = msg.path("from").asText(), to = msg.path("to").asText();
         int number = msg.path("number").asInt();
+        ReentrantLock pushLock = null;
         try {
             if (!REPO_NAME.matcher(repo).matches() || !REPO_NAME.matcher(headRepo).matches()
                     || !BRANCH.matcher(headRef).matches() || headRef.contains("..") || !SHA.matcher(from).matches()
                     || !SHA.matcher(to).matches()) {
                 throw new IllegalArgumentException("Refused a push with unexpected parameters");
             }
-            Path wt = cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
-            sanitize(repo);
-            if (!Files.isDirectory(wt)) throw new IllegalStateException("No worktree for " + repo + "#" + number);
+            Path wt = itemDir(repo, number);
+            pushLock = lockForGit(repo, number);
+            sanitizeItem(repo, wt);
+            if (!Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS)) throw new IllegalStateException("No worktree for " + repo + "#" + number);
             if (!gitOut(wt, "rev-parse", "HEAD").equals(to)) {
                 throw new IllegalStateException("The worktree moved on since the agent finished; ask it again");
             }
@@ -1185,6 +1362,8 @@ public class ElfRunner {
             }
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
+        } finally {
+            if (pushLock != null) pushLock.unlock();
         }
         send(result);
     }
@@ -1336,7 +1515,8 @@ public class ElfRunner {
                     "--ro-bind", Path.of(cfg.claude).getParent().toString(), Path.of(cfg.claude).getParent().toString(),
                     "--bind", w.resolve("m2").toString(), home + "/.m2",
                     "--bind", cfg.claudeConfigDir.toString(), cfg.claudeConfigDir.toString(),
-                    "--bind", w.resolve("repos").toString(), w.resolve("repos").toString(),
+                    // Item clones borrow objects from the cache: readable, never writable, from the sandbox.
+                    "--ro-bind", w.resolve("cache").toString(), w.resolve("cache").toString(),
                     "--bind", w.resolve("worktrees").toString(), w.resolve("worktrees").toString(),
                     "--bind", w.resolve("tmp").toString(), w.resolve("tmp").toString(),
                     "--ro-bind", w.resolve("gitconfig").toString(), w.resolve("gitconfig").toString(),
@@ -1451,7 +1631,7 @@ public class ElfRunner {
 
         /** Work dirs, the empty gh config, a credential-free global git config, and an empty MCP config by default. */
         void prepare() throws IOException {
-            Files.createDirectories(workDir.resolve("repos"));
+            Files.createDirectories(workDir.resolve("cache"));
             Files.createDirectories(workDir.resolve("worktrees"));
             Files.createDirectories(workDir.resolve("tmp"));
             Files.createDirectories(workDir.resolve("heads"));
