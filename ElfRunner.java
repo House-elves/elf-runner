@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.19.0"; // 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.20.0"; // 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -1527,21 +1527,48 @@ public class ElfRunner {
     static class Sandbox {
 
         /**
-         * The Claude config dir is shared by every run, so: each run sees only its own sessions (projects/<its dir>),
-         * gets fresh shell snapshots and session state, and can't change what other runs load (CLAUDE.md, settings,
-         * agents, commands, skills, plugins, output styles), which could otherwise steer every later agent and the
-         * prompt-injection check.
+         * The Claude config dir as this run sees it: empty but for what Claude needs, so nothing one run writes reaches
+         * another. Shared and writable: only the login (.credentials.json, which Claude refreshes). Its own: this
+         * run's sessions (projects/<its dir>) and a copy of .claude.json, refreshed from the master each run and never
+         * written back. Read-only: CLAUDE.md, settings, agents, commands, skills, plugins and output styles. Everything
+         * else Claude writes (caches, todos, shell snapshots...) lives and dies with the run.
          */
         static List<String> claudeIsolation(Config cfg, Path cwd) {
             Path c = cfg.claudeConfigDir;
             List<String> b = new ArrayList<>();
             try {
-                Path own = c.resolve("projects").resolve(cwd.toString().replaceAll("[^A-Za-z0-9]", "-"));
-                Files.createDirectories(own);
-                b.addAll(List.of("--tmpfs", c.resolve("projects").toString(), "--bind", own.toString(), own.toString()));
-                for (String d : List.of("shell-snapshots", "session-env", "sessions")) {
-                    b.addAll(List.of("--tmpfs", c.resolve(d).toString()));
+                Path creds = c.resolve(".credentials.json");
+                if (!Files.isRegularFile(creds, LinkOption.NOFOLLOW_LINKS)) {
+                    // Not logged in yet: the whole dir, so a /login in the sandbox shell is kept.
+                    return List.of("--bind", c.toString(), c.toString());
                 }
+                String name = cwd.toString().replaceAll("[^A-Za-z0-9]", "-");
+                // Claude names a project's dir after its path with every other character as '-', so two items can map
+                // to one dir (foo_bar#1 and foo-bar#1). Refuse rather than let one see the other's sessions.
+                Path parent = cwd.getParent();
+                if (parent != null && cwd.startsWith(cfg.workDir.resolve("worktrees"))) {
+                    try (var siblings = Files.list(parent)) {
+                        for (Path x : siblings.toList()) {
+                            if (!x.equals(cwd) && x.toString().replaceAll("[^A-Za-z0-9]", "-").equals(name)) {
+                                throw new IllegalStateException(cwd.getFileName() + " and " + x.getFileName()
+                                        + " would share Claude sessions; remove one of them from " + parent);
+                            }
+                        }
+                    }
+                }
+                Path own = c.resolve("projects").resolve(name);
+                Files.createDirectories(own);
+                Path state = cfg.workDir.resolve("claude-state");
+                Files.createDirectories(state);
+                Path copy = state.resolve(name + ".claude.json");
+                removeNoFollow(copy);
+                Path master = c.resolve(".claude.json");
+                if (Files.isRegularFile(master, LinkOption.NOFOLLOW_LINKS)) Files.copy(master, copy);
+                else Files.writeString(copy, "{}\n");
+                b.addAll(List.of("--tmpfs", c.toString(),
+                        "--bind", creds.toString(), creds.toString(),
+                        "--bind", copy.toString(), master.toString(),
+                        "--bind", own.toString(), own.toString()));
                 for (String f : List.of("CLAUDE.md", "settings.json", "settings.local.json")) {
                     Path p = c.resolve(f);
                     if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) Files.writeString(p, f.endsWith(".json") ? "{}\n" : "");
@@ -1576,15 +1603,13 @@ public class ElfRunner {
                     "--ro-bind", home + "/.sdkman", home + "/.sdkman",
                     "--ro-bind", Path.of(cfg.claude).getParent().toString(), Path.of(cfg.claude).getParent().toString(),
                     "--bind", w.resolve("m2").toString(), home + "/.m2",
-                    "--bind", cfg.claudeConfigDir.toString(), cfg.claudeConfigDir.toString(),
                     // Item clones borrow objects from the cache: readable, never writable, from the sandbox.
                     "--ro-bind", w.resolve("cache").toString(), w.resolve("cache").toString(),
-                    "--bind", w.resolve("tmp").toString(), w.resolve("tmp").toString(),
                     "--ro-bind", w.resolve("gitconfig").toString(), w.resolve("gitconfig").toString(),
                     "--ro-bind", w.resolve("gh-empty").toString(), w.resolve("gh-empty").toString(),
                     "--ro-bind", cfg.mcpConfig.toString(), cfg.mcpConfig.toString()));
             // Only this run's own directory (its item's clone, or the triage dir): never another item's clone.
-            if (cwd.startsWith(w.resolve("worktrees")) || cwd.startsWith(w.resolve("triage"))) {
+            if (cwd.startsWith(w.resolve("worktrees")) || cwd.startsWith(w.resolve("triage")) || cwd.equals(w.resolve("tmp"))) {
                 b.addAll(List.of("--bind", cwd.toString(), cwd.toString()));
             }
             b.addAll(claudeIsolation(cfg, cwd));
