@@ -836,7 +836,8 @@ public class ElfRunner {
      * A squashed push replaces exactly that, so it's the lease.
      */
     Path headFile(Path wt) {
-        return wt.resolveSibling(wt.getFileName() + ".pr-head");
+        // Outside the sandbox's reach (worktrees/ is writable to the agent): a squashed push's lease comes from here.
+        return cfg.workDir.resolve("heads").resolve(wt.getFileName() + ".pr-head");
     }
 
     /**
@@ -996,8 +997,33 @@ public class ElfRunner {
      */
     void sanitize(String repo) throws IOException {
         if (!REPO_NAME.matcher(repo).matches()) throw new IllegalArgumentException("Bad repo " + repo);
-        Path gitDir = cfg.workDir.resolve("repos").resolve(repo).resolve(".git");
-        if (!Files.isDirectory(gitDir, LinkOption.NOFOLLOW_LINKS)) return;
+        Path repos = cfg.workDir.resolve("repos");
+        Path owner = repos.resolve(repo.substring(0, repo.indexOf('/')));
+        Path clone = repos.resolve(repo);
+        Path gitDir = clone.resolve(".git");
+        if (!Files.exists(clone, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(owner)) return; // not cloned yet
+        // Fail closed: anything but real directories down to .git (a symlink, a "gitdir:" file) means the clone
+        // can't be trusted. Remove it and its worktrees; the next job clones afresh.
+        if (Files.isSymbolicLink(owner) || !Files.isDirectory(clone, LinkOption.NOFOLLOW_LINKS)
+                || !Files.isDirectory(gitDir, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(gitDir.resolve("objects"))) {
+            log("The clone of " + repo + " was tampered with; removing it and its worktrees");
+            removeNoFollow(Files.isSymbolicLink(owner) ? owner : clone);
+            String prefix = repo.replace('/', '_') + "_";
+            try (var wts = Files.list(cfg.workDir.resolve("worktrees"))) {
+                for (Path wt : wts.filter(x -> x.getFileName().toString().startsWith(prefix)).toList()) removeNoFollow(wt);
+            }
+            throw new IllegalStateException("The clone of " + repo + " had been changed from inside the sandbox, so it was"
+                    + " removed. Run the action again to start from a fresh clone.");
+        }
+        // Files git reads from a git dir that could point it elsewhere or change what it sees (their directories
+        // first, so nothing below resolves through a planted symlink).
+        for (String d : List.of("info", "objects/info")) {
+            if (Files.isSymbolicLink(gitDir.resolve(d))) Files.delete(gitDir.resolve(d));
+        }
+        for (String f : List.of("commondir", "config.worktree", "info/grafts", "objects/info/alternates",
+                "objects/info/http-alternates")) {
+            removeNoFollow(gitDir.resolve(f));
+        }
         replace(gitDir.resolve("config"), """
                 [core]
                 \trepositoryformatversion = 1
@@ -1012,9 +1038,7 @@ public class ElfRunner {
                 """.formatted(repo));
         removeNoFollow(gitDir.resolve("hooks"));
         Files.createDirectory(gitDir.resolve("hooks"));
-        Path info = gitDir.resolve("info");
-        if (Files.isSymbolicLink(info)) Files.delete(info);
-        else removeNoFollow(info.resolve("attributes"));
+        removeNoFollow(gitDir.resolve("info").resolve("attributes"));
         Path admin = gitDir.resolve("worktrees");
         if (Files.isSymbolicLink(admin)) Files.delete(admin);
         if (!Files.isDirectory(admin, LinkOption.NOFOLLOW_LINKS)) return;
@@ -1412,6 +1436,15 @@ public class ElfRunner {
             Files.createDirectories(workDir.resolve("repos"));
             Files.createDirectories(workDir.resolve("worktrees"));
             Files.createDirectories(workDir.resolve("tmp"));
+            Files.createDirectories(workDir.resolve("heads"));
+            // PR heads used to sit next to the worktrees, where the agent can write; they live in heads/ now.
+            try (var old = Files.list(workDir.resolve("worktrees"))) {
+                for (Path f : old.filter(x -> x.getFileName().toString().endsWith(".pr-head")).toList()) {
+                    Path to = workDir.resolve("heads").resolve(f.getFileName());
+                    if (Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS) && !Files.exists(to)) Files.move(f, to);
+                    else Files.deleteIfExists(f);
+                }
+            }
             Files.createDirectories(workDir.resolve("gh-empty"));
             Files.createDirectories(workDir.resolve("m2"));
             Files.createDirectories(claudeConfigDir);
