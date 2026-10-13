@@ -13,9 +13,12 @@ import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -48,7 +51,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.16.0"; // 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.17.0"; // 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -255,6 +258,7 @@ public class ElfRunner {
             watchdog.interrupt();
         }
         int exit = p.waitFor();
+        sanitize(checkout.path("repo").asText()); // before the runner's own git reads the agent's commits
         if (!running.containsKey(job)) return; // cancelled
         if (result == null || result.path("is_error").asBoolean() || !result.path("structured_output").isObject()) {
             String why = result == null ? "Claude Code exited with code " + exit
@@ -799,6 +803,7 @@ public class ElfRunner {
 
         Path clone = cfg.workDir.resolve("repos").resolve(repo);
         Path wt = cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
+        sanitize(repo);
         if (!Files.isDirectory(clone.resolve(".git")) && !Files.isRegularFile(clone.resolve("HEAD"))) {
             event(job, "Cloning " + repo + " (first time only)…");
             Files.createDirectories(clone.getParent());
@@ -956,14 +961,93 @@ public class ElfRunner {
 
     static final int MAX_PATCH = 400_000;
 
-    /** The change itself, for you to read in the desk before it's pushed: {patch, patchCut} (cut at MAX_PATCH). */
+    /**
+     * The change itself, for you to read in the desk before it's pushed: {patch, patchCut} (cut at MAX_PATCH bytes).
+     * Every byte as text: no textconv, external diff or "-diff" attribute can hide or rewrite what you review. Read
+     * no further than the cap, so a huge change can't exhaust the runner's memory.
+     */
     void putPatch(ObjectNode git, Path wt, String from, String to) {
         try {
-            String patch = gitOut(wt, "diff", "--no-color", "--no-ext-diff", "-M", from, to);
-            git.put("patch", patch.length() <= MAX_PATCH ? patch : patch.substring(0, MAX_PATCH));
-            git.put("patchCut", patch.length() > MAX_PATCH);
+            ProcessBuilder pb = new ProcessBuilder("git", "-c", "core.attributesFile=/dev/null", "diff", "--no-color",
+                    "--no-ext-diff", "--no-textconv", "--text", "-M", from, to)
+                    .directory(wt.toFile()).redirectError(ProcessBuilder.Redirect.DISCARD);
+            scrub(pb.environment());
+            Process p = pb.start();
+            byte[] bytes = p.getInputStream().readNBytes(MAX_PATCH + 1);
+            boolean cut = bytes.length > MAX_PATCH;
+            if (cut) kill(p);
+            else if (!p.waitFor(2, TimeUnit.MINUTES)) {
+                kill(p);
+                throw new IOException("git diff timed out");
+            }
+            String patch = new String(bytes, 0, Math.min(bytes.length, MAX_PATCH), StandardCharsets.UTF_8);
+            git.put("patch", patch).put("patchCut", cut);
         } catch (Exception e) {
             log("Couldn't read the diff: " + rootMessage(e));
+        }
+    }
+
+    /**
+     * The agent's sandbox can write to the clones and worktrees, but the runner runs git there outside it (fetch,
+     * checkout, diff, push with your token). So before each use, everything git would run or obey is reset to what
+     * the runner set up: the clone's config (no hooks path, fsmonitor, url rewrites, filters or diff drivers), its
+     * hooks, info/attributes, per-worktree config, and the links between the worktrees and the clone. Nothing here
+     * follows a symlink the agent may have planted.
+     */
+    void sanitize(String repo) throws IOException {
+        if (!REPO_NAME.matcher(repo).matches()) throw new IllegalArgumentException("Bad repo " + repo);
+        Path gitDir = cfg.workDir.resolve("repos").resolve(repo).resolve(".git");
+        if (!Files.isDirectory(gitDir, LinkOption.NOFOLLOW_LINKS)) return;
+        replace(gitDir.resolve("config"), """
+                [core]
+                \trepositoryformatversion = 1
+                \tfilemode = true
+                \tbare = false
+                \tlogallrefupdates = true
+                [remote "origin"]
+                \turl = https://github.com/%s.git
+                \tfetch = +refs/heads/*:refs/remotes/origin/*
+                \tpromisor = true
+                \tpartialclonefilter = blob:none
+                """.formatted(repo));
+        removeNoFollow(gitDir.resolve("hooks"));
+        Files.createDirectory(gitDir.resolve("hooks"));
+        Path info = gitDir.resolve("info");
+        if (Files.isSymbolicLink(info)) Files.delete(info);
+        else removeNoFollow(info.resolve("attributes"));
+        Path admin = gitDir.resolve("worktrees");
+        if (Files.isSymbolicLink(admin)) Files.delete(admin);
+        if (!Files.isDirectory(admin, LinkOption.NOFOLLOW_LINKS)) return;
+        try (var names = Files.list(admin)) {
+            for (Path one : names.toList()) {
+                if (!Files.isDirectory(one, LinkOption.NOFOLLOW_LINKS)) {
+                    removeNoFollow(one);
+                    continue;
+                }
+                Path wt = cfg.workDir.resolve("worktrees").resolve(one.getFileName().toString());
+                removeNoFollow(one.resolve("config.worktree"));
+                replace(one.resolve("commondir"), "../..\n");
+                replace(one.resolve("gitdir"), wt.resolve(".git") + "\n");
+                if (Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS)) replace(wt.resolve(".git"), "gitdir: " + one + "\n");
+            }
+        }
+    }
+
+    /** Writes a fresh file, never through whatever was there (a symlink, a directory). */
+    static void replace(Path file, String content) throws IOException {
+        removeNoFollow(file);
+        Files.writeString(file, content, StandardOpenOption.CREATE_NEW);
+    }
+
+    /** Deletes a file, a symlink (not its target) or a directory tree, without following links. */
+    static void removeNoFollow(Path path) throws IOException {
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return;
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            try (var walk = Files.walk(path)) {
+                for (Path x : walk.sorted(Comparator.reverseOrder()).toList()) Files.delete(x);
+            }
+        } else {
+            Files.delete(path);
         }
     }
 
@@ -1012,6 +1096,7 @@ public class ElfRunner {
                 throw new IllegalArgumentException("Refused a push with unexpected parameters");
             }
             Path wt = cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
+            sanitize(repo);
             if (!Files.isDirectory(wt)) throw new IllegalStateException("No worktree for " + repo + "#" + number);
             if (!gitOut(wt, "rev-parse", "HEAD").equals(to)) {
                 throw new IllegalStateException("The worktree moved on since the agent finished; ask it again");
