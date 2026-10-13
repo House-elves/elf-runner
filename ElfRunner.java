@@ -827,7 +827,7 @@ public class ElfRunner {
         } else if (!keep) {
             git(wt, "checkout", "--detach", "--force", target);
         }
-        if (pr && (!keep || !Files.exists(headFile(wt)))) Files.writeString(headFile(wt), gitOut(wt, "rev-parse", "HEAD"));
+        if (pr && (!keep || !Files.exists(headFile(wt)))) replace(headFile(wt), gitOut(wt, "rev-parse", "HEAD"));
         return wt;
     }
 
@@ -1010,7 +1010,7 @@ public class ElfRunner {
             removeNoFollow(Files.isSymbolicLink(owner) ? owner : clone);
             String prefix = repo.replace('/', '_') + "_";
             try (var wts = Files.list(cfg.workDir.resolve("worktrees"))) {
-                for (Path wt : wts.filter(x -> x.getFileName().toString().startsWith(prefix)).toList()) removeNoFollow(wt);
+                for (Path wt : wts.filter(x -> isWorktreeOf(x, prefix)).toList()) removeNoFollow(wt);
             }
             throw new IllegalStateException("The clone of " + repo + " had been changed from inside the sandbox, so it was"
                     + " removed. Run the action again to start from a fresh clone.");
@@ -1041,6 +1041,18 @@ public class ElfRunner {
         removeNoFollow(gitDir.resolve("info").resolve("attributes"));
         Path admin = gitDir.resolve("worktrees");
         if (Files.isSymbolicLink(admin)) Files.delete(admin);
+        // Every worktree of this repo must be a real directory with a registered admin dir: anything else (a
+        // symlink, a planted repo of its own) is removed, so the runner's git never runs in a repo the agent made.
+        String prefix = repo.replace('/', '_') + "_";
+        try (var wts = Files.list(cfg.workDir.resolve("worktrees"))) {
+            for (Path wt : wts.filter(x -> isWorktreeOf(x, prefix)).toList()) {
+                if (!Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS)
+                        || !Files.isDirectory(admin.resolve(wt.getFileName().toString()), LinkOption.NOFOLLOW_LINKS)) {
+                    log("Removing worktree " + wt.getFileName() + ": not a worktree of " + repo);
+                    removeNoFollow(wt);
+                }
+            }
+        }
         if (!Files.isDirectory(admin, LinkOption.NOFOLLOW_LINKS)) return;
         try (var names = Files.list(admin)) {
             for (Path one : names.toList()) {
@@ -1055,6 +1067,12 @@ public class ElfRunner {
                 if (Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS)) replace(wt.resolve(".git"), "gitdir: " + one + "\n");
             }
         }
+    }
+
+    /** worktrees/owner_repo_N for exactly this repo (a repo named "repo_x" has its own, longer prefix). */
+    static boolean isWorktreeOf(Path wt, String prefix) {
+        String name = wt.getFileName().toString();
+        return name.startsWith(prefix) && name.substring(prefix.length()).matches("\\d+");
     }
 
     /** Writes a fresh file, never through whatever was there (a symlink, a directory). */
@@ -1162,7 +1180,7 @@ public class ElfRunner {
             } else {
                 log("Pushed " + from.substring(0, 7) + ".." + to.substring(0, 7) + " to " + headRepo + ":" + headRef
                         + " as " + cfg.githubUser);
-                Files.writeString(headFile(wt), to); // what's on GitHub now
+                replace(headFile(wt), to); // what's on GitHub now
                 result.put("status", 200).put("body", "{}");
             }
         } catch (Exception e) {
@@ -1441,8 +1459,12 @@ public class ElfRunner {
             try (var old = Files.list(workDir.resolve("worktrees"))) {
                 for (Path f : old.filter(x -> x.getFileName().toString().endsWith(".pr-head")).toList()) {
                     Path to = workDir.resolve("heads").resolve(f.getFileName());
-                    if (Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS) && !Files.exists(to)) Files.move(f, to);
-                    else Files.deleteIfExists(f);
+                    // Only a plain file with no other links: a hardlink to anything else would be written through later.
+                    if (Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS) && !Files.exists(to)
+                            && (Integer) Files.getAttribute(f, "unix:nlink", LinkOption.NOFOLLOW_LINKS) == 1) {
+                        Files.writeString(to, Files.readString(f).strip(), StandardOpenOption.CREATE_NEW);
+                    }
+                    Files.delete(f);
                 }
             }
             Files.createDirectories(workDir.resolve("gh-empty"));
