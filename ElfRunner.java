@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.23.0"; // 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.24.0"; // 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -176,6 +176,7 @@ public class ElfRunner {
                 case "triage.run" -> triageRun(msg);
                 case "triage.markRead" -> triageMarkRead(msg);
                 case "triage.zulipRead" -> triageZulipRead(msg);
+                case "status.send" -> statusSend(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -453,7 +454,12 @@ public class ElfRunner {
     /** What the desk may ask daily-triage for, and the arguments each run gets: nothing else is ever passed. */
     static final Map<String, List<String>> TRIAGE_MODES = Map.of(
             "email", List.of("--triage-only", "--no-email"), // the email triage, shown in the desk, not emailed
-            "zulip", List.of("--zulip-only")); // the last day of Zulip with a digest per topic; marks nothing read
+            "zulip", List.of("--zulip-only"), // the last day of Zulip with a digest per topic; marks nothing read
+            "status", List.of("--save")); // weekly-status: this week's status as a draft; sends nothing
+    /** The elf each mode runs. */
+    static String triageElf(String mode) {
+        return mode.equals("status") ? "weekly-status" : "daily-triage";
+    }
     static final String TRIAGE_UNIT = "daily-triage-desk-";
     final Object triageWatch = new Object();
     volatile boolean triageWatching;
@@ -470,12 +476,12 @@ public class ElfRunner {
             List<String> args = TRIAGE_MODES.get(mode);
             if (args == null) throw new IllegalArgumentException("Bad daily-triage mode");
             if (triageRunning().contains(mode)) throw new IllegalStateException("It's already running; wait for it to finish");
-            Path elf = which("daily-triage");
-            if (elf == null) throw new IllegalStateException("daily-triage isn't on the runner's PATH");
+            Path elf = which(triageElf(mode));
+            if (elf == null) throw new IllegalStateException(triageElf(mode) + " isn't on the runner's PATH");
             String unit = TRIAGE_UNIT + mode;
             new ProcessBuilder("systemctl", "--user", "reset-failed", unit).start().waitFor(10, TimeUnit.SECONDS);
             List<String> cmd = new ArrayList<>(List.of("systemd-run", "--user", "--unit=" + unit,
-                    "--description=daily-triage " + mode + " for Elf Desk", "--property=Nice=10",
+                    "--description=" + triageElf(mode) + " " + mode + " for Elf Desk", "--property=Nice=10",
                     "--property=TimeoutStartSec=3h", "--setenv=PATH=" + System.getenv("PATH"), elf.toString()));
             cmd.addAll(args);
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
@@ -483,7 +489,7 @@ public class ElfRunner {
             if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) {
                 throw new IOException("Couldn't start daily-triage: " + clip(out, 300));
             }
-            log("Started daily-triage " + mode);
+            log("Started " + triageElf(mode) + " " + mode);
             result.put("status", 200).put("body", "{}");
             watchTriage();
         } catch (Exception e) {
@@ -554,19 +560,46 @@ public class ElfRunner {
         send(result);
     }
 
+    static final Pattern STATUS_ID = Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}");
+
+    /**
+     * The desk's Send on the weekly status: weekly-status sends its saved draft {@code draft} with your edited
+     * {@code body} (on its stdin) to the recipients in its own config, and records that it went out.
+     */
+    void statusSend(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
+        try {
+            String draft = msg.path("draft").asText("");
+            String body = msg.path("body").asText("");
+            if (!STATUS_ID.matcher(draft).matches()) throw new IllegalArgumentException("Bad draft id");
+            if (body.isBlank() || body.length() > 100_000) throw new IllegalArgumentException("The status is empty or too long");
+            result.put("status", 200).put("body", runElf("weekly-status", List.of("--send=" + draft), body));
+            log("Sent the weekly status " + draft);
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
     /** daily-triage with these arguments, waited for: its last output line, or its output as the error. */
     static String runTriage(List<String> args) throws Exception {
-        Path elf = which("daily-triage");
-        if (elf == null) throw new IllegalStateException("daily-triage isn't on the runner's PATH");
+        return runElf("daily-triage", args, null);
+    }
+
+    static String runElf(String name, List<String> args, String stdin) throws Exception {
+        Path elf = which(name);
+        if (elf == null) throw new IllegalStateException(name + " isn't on the runner's PATH");
         List<String> cmd = new ArrayList<>(List.of(elf.toString()));
         cmd.addAll(args);
-        Path log = Files.createTempFile("elf-triage", ".log");
+        Path log = Files.createTempFile("elf-" + name, ".log");
         try {
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(log.toFile()).start();
-            p.getOutputStream().close();
+            try (var in = p.getOutputStream()) {
+                if (stdin != null) in.write(stdin.getBytes(StandardCharsets.UTF_8));
+            }
             if (!p.waitFor(120, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
-                throw new IOException("daily-triage took too long");
+                throw new IOException(name + " took too long");
             }
             String out = Files.readString(log).strip();
             if (p.exitValue() != 0) throw new IOException(clip(out, 300));
