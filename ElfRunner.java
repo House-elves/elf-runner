@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.21.0"; // 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.22.0"; // 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -174,6 +174,7 @@ public class ElfRunner {
                 case "github.ready" -> readyForReview(msg);
                 case "mvnpm.run" -> mvnpmRun(msg);
                 case "triage.run" -> triageRun(msg);
+                case "triage.markRead" -> triageMarkRead(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -484,6 +485,47 @@ public class ElfRunner {
             log("Started daily-triage " + mode);
             result.put("status", 200).put("body", "{}");
             watchTriage();
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}");
+    /** daily-triage checks it again; nothing that could leave the argument or break its IMAP command. */
+    static final Pattern MESSAGE_ID = Pattern.compile("<?[\\x21-\\x7E&&[^\"\\\\<>()]]{1,500}>?"); // printable ASCII only
+
+    /**
+     * The desk's Done on an email: daily-triage marks that message's INBOX thread read in one of its own Gmail
+     * accounts (it has the credentials; the desk doesn't). Answers with how many messages it marked.
+     */
+    void triageMarkRead(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
+        try {
+            String account = msg.path("account").asText("");
+            String messageId = msg.path("messageId").asText("");
+            if (!EMAIL.matcher(account).matches()) throw new IllegalArgumentException("Bad account");
+            if (!MESSAGE_ID.matcher(messageId).matches()) throw new IllegalArgumentException("Bad Message-ID");
+            Path elf = which("daily-triage");
+            if (elf == null) throw new IllegalStateException("daily-triage isn't on the runner's PATH");
+            Path log = Files.createTempFile("elf-mark-read", ".log");
+            String out;
+            try {
+                Process p = new ProcessBuilder(elf.toString(), "--mark-read", account, "--message-id", messageId)
+                        .redirectErrorStream(true).redirectOutput(log.toFile()).start();
+                p.getOutputStream().close();
+                if (!p.waitFor(120, TimeUnit.SECONDS)) {
+                    p.destroyForcibly();
+                    throw new IOException("daily-triage took too long");
+                }
+                out = Files.readString(log).strip();
+                if (p.exitValue() != 0) throw new IOException(clip(out, 300));
+            } finally {
+                Files.deleteIfExists(log);
+            }
+            String last = out.substring(out.lastIndexOf('\n') + 1);
+            result.put("status", 200).put("body", last);
+            log("Marked an email thread read in " + account);
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
         }
