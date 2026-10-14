@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.22.0"; // 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.23.0"; // 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -175,6 +175,7 @@ public class ElfRunner {
                 case "mvnpm.run" -> mvnpmRun(msg);
                 case "triage.run" -> triageRun(msg);
                 case "triage.markRead" -> triageMarkRead(msg);
+                case "triage.zulipRead" -> triageZulipRead(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -507,30 +508,72 @@ public class ElfRunner {
             String messageId = msg.path("messageId").asText("");
             if (!EMAIL.matcher(account).matches()) throw new IllegalArgumentException("Bad account");
             if (!MESSAGE_ID.matcher(messageId).matches()) throw new IllegalArgumentException("Bad Message-ID");
-            Path elf = which("daily-triage");
-            if (elf == null) throw new IllegalStateException("daily-triage isn't on the runner's PATH");
-            Path log = Files.createTempFile("elf-mark-read", ".log");
-            String out;
-            try {
-                Process p = new ProcessBuilder(elf.toString(), "--mark-read=" + account, "--message-id=" + messageId)
-                        .redirectErrorStream(true).redirectOutput(log.toFile()).start();
-                p.getOutputStream().close();
-                if (!p.waitFor(120, TimeUnit.SECONDS)) {
-                    p.destroyForcibly();
-                    throw new IOException("daily-triage took too long");
-                }
-                out = Files.readString(log).strip();
-                if (p.exitValue() != 0) throw new IOException(clip(out, 300));
-            } finally {
-                Files.deleteIfExists(log);
-            }
-            String last = out.substring(out.lastIndexOf('\n') + 1);
+            String last = runTriage(List.of("--mark-read=" + account, "--message-id=" + messageId));
             result.put("status", 200).put("body", last);
             log("Marked an email thread read in " + account);
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
         }
         send(result);
+    }
+
+    static final Pattern HOST = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]{0,252}");
+
+    /**
+     * The desk's Done on a Zulip topic: daily-triage (which holds the API key) marks the topic's unread messages
+     * read, and/or the given message ids. Stream and topic go to Zulip's API as JSON, never into a command line
+     * other than as attached option values.
+     */
+    void triageZulipRead(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
+        try {
+            String server = msg.path("server").asText("");
+            if (!HOST.matcher(server).matches()) throw new IllegalArgumentException("Bad Zulip server");
+            List<String> args = new ArrayList<>(List.of("--zulip-read=" + server));
+            if (msg.hasNonNull("stream")) {
+                String stream = msg.path("stream").asText(""), topic = msg.path("topic").asText("");
+                for (String s : List.of(stream, topic)) {
+                    if (s.length() > 200 || s.chars().anyMatch(Character::isISOControl)) throw new IllegalArgumentException("Bad stream or topic");
+                }
+                if (stream.isBlank()) throw new IllegalArgumentException("Bad stream");
+                args.add("--stream=" + stream);
+                args.add("--topic=" + topic);
+            }
+            JsonNode ids = msg.path("messages");
+            if (ids.size() > 500) throw new IllegalArgumentException("Too many messages");
+            for (JsonNode id : ids) {
+                if (!id.isIntegralNumber() || id.asLong() <= 0) throw new IllegalArgumentException("Bad message id");
+                args.add("--zulip-message=" + id.asLong());
+            }
+            if (args.size() == 1) throw new IllegalArgumentException("Nothing to mark read");
+            result.put("status", 200).put("body", runTriage(args));
+            log("Marked Zulip messages read on " + server);
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    /** daily-triage with these arguments, waited for: its last output line, or its output as the error. */
+    static String runTriage(List<String> args) throws Exception {
+        Path elf = which("daily-triage");
+        if (elf == null) throw new IllegalStateException("daily-triage isn't on the runner's PATH");
+        List<String> cmd = new ArrayList<>(List.of(elf.toString()));
+        cmd.addAll(args);
+        Path log = Files.createTempFile("elf-triage", ".log");
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+            p.getOutputStream().close();
+            if (!p.waitFor(120, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                throw new IOException("daily-triage took too long");
+            }
+            String out = Files.readString(log).strip();
+            if (p.exitValue() != 0) throw new IOException(clip(out, 300));
+            return out.substring(out.lastIndexOf('\n') + 1);
+        } finally {
+            Files.deleteIfExists(log);
+        }
     }
 
     /** The modes running now. */
