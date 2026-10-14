@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.24.0"; // 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.25.0"; // 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -564,17 +564,20 @@ public class ElfRunner {
 
     /**
      * The desk's Send on the weekly status: weekly-status sends its saved draft {@code draft} with your edited
-     * {@code body} (on its stdin) to the recipients in its own config, and records that it went out.
+     * {@code body} (on its stdin) to {@code target}, me or team (the addresses are in its own config), and records
+     * that it went out.
      */
     void statusSend(JsonNode msg) {
         ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
         try {
             String draft = msg.path("draft").asText("");
             String body = msg.path("body").asText("");
+            String target = msg.path("target").asText("me");
             if (!STATUS_ID.matcher(draft).matches()) throw new IllegalArgumentException("Bad draft id");
+            if (!target.equals("me") && !target.equals("team")) throw new IllegalArgumentException("Bad target");
             if (body.isBlank() || body.length() > 100_000) throw new IllegalArgumentException("The status is empty or too long");
-            result.put("status", 200).put("body", runElf("weekly-status", List.of("--send=" + draft), body));
-            log("Sent the weekly status " + draft);
+            result.put("status", 200).put("body", runElf("weekly-status", List.of("--send=" + draft, "--to=" + target), body));
+            log("Sent the weekly status " + draft + " to " + target);
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
         }
