@@ -491,9 +491,10 @@ public class ElfRunner {
         send(result);
     }
 
-    static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}");
+    static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@[A-Za-z0-9.-]{1,190}");
     /** daily-triage checks it again; nothing that could leave the argument or break its IMAP command. */
-    static final Pattern MESSAGE_ID = Pattern.compile("<?[\\x21-\\x7E&&[^\"\\\\<>()]]{1,500}>?"); // printable ASCII only
+    // Printable ASCII only, never starting with "-" (it would read as an option)
+    static final Pattern MESSAGE_ID = Pattern.compile("<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?");
 
     /**
      * The desk's Done on an email: daily-triage marks that message's INBOX thread read in one of its own Gmail
@@ -511,7 +512,7 @@ public class ElfRunner {
             Path log = Files.createTempFile("elf-mark-read", ".log");
             String out;
             try {
-                Process p = new ProcessBuilder(elf.toString(), "--mark-read", account, "--message-id", messageId)
+                Process p = new ProcessBuilder(elf.toString(), "--mark-read=" + account, "--message-id=" + messageId)
                         .redirectErrorStream(true).redirectOutput(log.toFile()).start();
                 p.getOutputStream().close();
                 if (!p.waitFor(120, TimeUnit.SECONDS)) {
