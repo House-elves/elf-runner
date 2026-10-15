@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.29.0"; // 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.29.1"; // 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -1821,7 +1821,7 @@ public class ElfRunner {
     static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
     static final Set<String> FILE_TYPES = Set.of("png", "jpg", "jpeg", "gif", "webp", "txt", "md", "log", "csv", "json",
             "diff", "patch");
-    static final int MAX_FILES = 20;
+    static final int MAX_FILES = 20, FILE_CHUNK = 64 * 1024;
     static final long MAX_FILE = 10L * 1024 * 1024, MAX_FILES_TOTAL = 60L * 1024 * 1024;
 
     /**
@@ -1848,9 +1848,15 @@ public class ElfRunner {
                     event(job, "Didn't keep " + clip(name, 100) + " (" + skip + ")");
                     continue;
                 }
+                // In chunks: the desk's socket keeps a small message limit.
                 byte[] data = Files.readAllBytes(f);
-                send(JSON.createObjectNode().put("type", "job.file").put("job", job).put("name", name)
-                        .put("data", java.util.Base64.getEncoder().encodeToString(data)));
+                int parts = Math.max(1, (data.length + FILE_CHUNK - 1) / FILE_CHUNK);
+                for (int part = 0; part < parts; part++) {
+                    int from = part * FILE_CHUNK, to = Math.min(data.length, from + FILE_CHUNK);
+                    send(JSON.createObjectNode().put("type", "job.file").put("job", job).put("name", name)
+                            .put("part", part).put("parts", parts)
+                            .put("data", java.util.Base64.getEncoder().encodeToString(java.util.Arrays.copyOfRange(data, from, to))));
+                }
                 sent++;
                 total += size;
             }
