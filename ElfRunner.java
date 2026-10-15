@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.27.0"; // 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.28.0"; // 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -177,6 +177,8 @@ public class ElfRunner {
                 case "triage.markRead" -> triageMarkRead(msg);
                 case "triage.zulipRead" -> triageZulipRead(msg);
                 case "status.send" -> statusSend(msg);
+                case "elf.config" -> elfConfig(msg);
+                case "elf.configSet" -> elfConfigSet(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -448,6 +450,223 @@ public class ElfRunner {
             result.put("status", 0).put("error", rootMessage(e));
         }
         send(result);
+    }
+
+    // ---- the elves' config, for the desk's settings ----
+
+    /** How a setting is checked before it's written. */
+    enum Kind { TEXT, LOGIN, EMAIL, EMAILS, WORDS, REPOS, HOST, INT, BOOL, CALENDAR, SECRET }
+
+    /**
+     * One setting the desk may read and change. Nothing else in a config file is ever shown or written.
+     *
+     * @param min,max for INT
+     * @param timer   for CALENDAR: the systemd user timer whose OnCalendar it sets
+     */
+    record Setting(String key, String label, String help, Kind kind, int min, int max, String timer) {
+        Setting(String key, String label, String help, Kind kind) {
+            this(key, label, help, kind, 0, 0, null);
+        }
+    }
+
+    record ElfConfig(Path file, List<Setting> settings) {
+    }
+
+    static final Path HOME = Path.of(System.getProperty("user.home"));
+
+    /** The elves the desk configures, and what of each. */
+    static final Map<String, ElfConfig> ELF_CONFIGS = Map.of(
+            "daily-triage", new ElfConfig(HOME.resolve(".config/daily-triage/config"), List.of(
+                    new Setting("GMAIL_ADDRESS", "Gmail account", "The inbox the email triage reads.", Kind.EMAIL),
+                    new Setting("GMAIL_APP_PASSWORD", "Gmail app password", "From myaccount.google.com/apppasswords.", Kind.SECRET),
+                    new Setting("MAX_EMAILS", "Emails per triage", "The most unread emails one triage looks at.", Kind.INT, 1, 500, null),
+                    new Setting("TRIAGE_LABEL", "Label for noise", "The Gmail label for what the triage marks read.", Kind.TEXT),
+                    new Setting("ZULIP_SERVER_1", "Zulip server", "For example quarkusio.zulipchat.com.", Kind.HOST),
+                    new Setting("ZULIP_EMAIL_1", "Zulip account", "The email you sign in to Zulip with.", Kind.EMAIL),
+                    new Setting("ZULIP_API_KEY_1", "Zulip API key", "From Zulip: Personal settings, Account and privacy, API key.", Kind.SECRET),
+                    new Setting("ZULIP_WATCH_1", "Streams to read", "Comma-separated stream names, or * for all your streams.", Kind.WORDS))),
+            "weekly-status", new ElfConfig(HOME.resolve(".config/weekly-status/config"), List.of(
+                    new Setting("DISPLAY_NAME", "Your name", "In the subject line.", Kind.TEXT),
+                    new Setting("GITHUB_USER", "GitHub account", "Whose work goes in the status.", Kind.LOGIN),
+                    new Setting("EXCLUDE_ORGS", "Leave out these orgs", "Comma-separated GitHub orgs whose work isn't part of the status.", Kind.WORDS),
+                    new Setting("LOOKBACK_DAYS", "Days covered", "How far back each status looks.", Kind.INT, 1, 31, null),
+                    new Setting("SEND_TO", "Send to me", "Where Send to me goes (comma-separated).", Kind.EMAILS),
+                    new Setting("TEAM_TO", "Send to the team", "Where Send to team goes (comma-separated).", Kind.EMAILS),
+                    new Setting("GMAIL_ADDRESS", "Send from", "The Gmail account it sends with.", Kind.EMAIL),
+                    new Setting("GMAIL_APP_PASSWORD", "Gmail app password", "From myaccount.google.com/apppasswords.", Kind.SECRET),
+                    new Setting("SCHEDULE", "Draft it on", "When the draft is written, in systemd's calendar format: Mon *-*-* 08:00:00.",
+                            Kind.CALENDAR, 0, 0, "weekly-status.timer"))),
+            "quarterly-review", new ElfConfig(HOME.resolve(".config/quarterly-review/config"), List.of(
+                    new Setting("DISPLAY_NAME", "Your name", "Who the review is about.", Kind.TEXT),
+                    new Setting("GITHUB_USER", "GitHub account", "Whose work goes in the review.", Kind.LOGIN),
+                    new Setting("EXCLUDE_ORGS", "Leave out these orgs", "Comma-separated GitHub orgs whose work isn't part of the review.", Kind.WORDS))),
+            "mvnpm-dependabot", new ElfConfig(HOME.resolve(".config/mvnpm-dependabot/config"), List.of(
+                    new Setting("REPOS", "Repos it checks", "Comma-separated owner/repo whose mvnpm bumps it checks.", Kind.REPOS),
+                    new Setting("APPROVE_MAJOR", "Check major bumps too", "Off: major version bumps are left for you.", Kind.BOOL),
+                    new Setting("AGENT_MODEL", "Claude model", "Empty for the default.", Kind.TEXT))),
+            "elf-runner", new ElfConfig(HOME.resolve(".config/elf-runner/config"), List.of(
+                    new Setting("MAX_JOBS", "Agents at a time", "More use more memory. Applies when the runner restarts.", Kind.INT, 1, 4, null),
+                    new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240, null),
+                    new Setting("SANDBOX_PODMAN", "Podman in the sandbox", "Lets agents use Dev Services and Testcontainers. Applies when the runner restarts.", Kind.BOOL))));
+
+    static final Pattern LOGIN = Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})");
+    static final Pattern WORD = Pattern.compile("[A-Za-z0-9 ._*/+#&()-]{1,100}");
+    static final Pattern MODEL = Pattern.compile("[A-Za-z0-9._\\[\\]-]{0,80}");
+    static final Pattern CALENDAR = Pattern.compile("[A-Za-z0-9 *:,./~-]{1,100}");
+
+    /** The desk's settings: an elf's settings and their values; secrets only say whether they're set. */
+    void elfConfig(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "elf.config.result").put("id", msg.path("id").asText());
+        try {
+            result.put("status", 200).put("body", configView(msg.path("elf").asText()).toString());
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    /**
+     * Changes settings: every value is checked first (nothing is written if one is wrong), then the config file is
+     * rewritten in place (other lines kept) and a schedule also goes to its timer. An empty secret keeps the old one.
+     */
+    void elfConfigSet(JsonNode msg) {
+        ObjectNode result = JSON.createObjectNode().put("type", "elf.config.result").put("id", msg.path("id").asText());
+        try {
+            String elf = msg.path("elf").asText();
+            ElfConfig config = ELF_CONFIGS.get(elf);
+            if (config == null) throw new IllegalArgumentException("Not an elf the desk configures");
+            if (!Files.isRegularFile(config.file())) throw new IllegalStateException(elf + " isn't set up on this machine");
+            Map<String, String> changes = new java.util.LinkedHashMap<>();
+            Map<String, String> wrong = new java.util.LinkedHashMap<>();
+            var fields = msg.path("values").fields();
+            while (fields.hasNext()) {
+                var f = fields.next();
+                Setting s = config.settings().stream().filter(x -> x.key().equals(f.getKey())).findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("Not a setting: " + f.getKey()));
+                String value = f.getValue().asText("").strip();
+                if (s.kind() == Kind.SECRET && value.isEmpty()) continue;
+                String why = check(s, value);
+                if (why != null) wrong.put(s.key(), why);
+                else changes.put(s.key(), s.kind() == Kind.EMAILS || s.kind() == Kind.WORDS || s.kind() == Kind.REPOS
+                        ? String.join(",", Arrays.stream(value.split(",")).map(String::strip).filter(x -> !x.isEmpty()).toList())
+                        : value);
+            }
+            if (!wrong.isEmpty()) {
+                result.put("status", 422).put("body", JSON.createObjectNode().set("wrong", JSON.valueToTree(wrong)).toString());
+            } else {
+                writeConfig(config.file(), changes);
+                for (Setting s : config.settings()) {
+                    if (s.timer() != null && changes.containsKey(s.key())) setTimer(s.timer(), changes.get(s.key()));
+                }
+                log("Changed " + elf + " settings: " + String.join(", ", changes.keySet()));
+                result.put("status", 200).put("body", configView(elf).toString());
+            }
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    static ObjectNode configView(String elf) throws IOException {
+        ElfConfig config = ELF_CONFIGS.get(elf);
+        if (config == null) throw new IllegalArgumentException("Not an elf the desk configures");
+        ObjectNode out = JSON.createObjectNode().put("elf", elf).put("installed", Files.isRegularFile(config.file()))
+                .put("file", "~/" + HOME.relativize(config.file()));
+        Map<String, String> values = Files.isRegularFile(config.file()) ? readConfig(config.file()) : Map.of();
+        var list = out.putArray("settings");
+        for (Setting s : config.settings()) {
+            ObjectNode n = list.addObject().put("key", s.key()).put("label", s.label()).put("help", s.help())
+                    .put("kind", s.kind().name().toLowerCase(java.util.Locale.ROOT));
+            if (s.kind() == Kind.INT) n.put("min", s.min()).put("max", s.max());
+            String v = values.getOrDefault(s.key(), "");
+            if (s.kind() == Kind.SECRET) n.put("set", !v.isBlank());
+            else n.put("value", v);
+        }
+        return out;
+    }
+
+    /** Why this value won't do, or null. */
+    static String check(Setting s, String v) {
+        if (v.length() > 500 || v.chars().anyMatch(c -> c < 0x20 || c == 0x7f)) return "Too long, or has a line break";
+        boolean ok = switch (s.kind()) {
+            case TEXT -> s.key().equals("AGENT_MODEL") ? MODEL.matcher(v).matches() : v.length() <= 200;
+            case LOGIN -> LOGIN.matcher(v).matches();
+            case EMAIL -> EMAIL.matcher(v).matches();
+            case EMAILS -> !v.isBlank() && Arrays.stream(v.split(",")).map(String::strip).filter(x -> !x.isEmpty())
+                    .allMatch(x -> EMAIL.matcher(x).matches());
+            case WORDS -> v.isBlank() || Arrays.stream(v.split(",")).map(String::strip).filter(x -> !x.isEmpty())
+                    .allMatch(x -> WORD.matcher(x).matches());
+            case REPOS -> !v.isBlank() && Arrays.stream(v.split(",")).map(String::strip).filter(x -> !x.isEmpty())
+                    .allMatch(x -> REPO_NAME.matcher(x).matches());
+            case HOST -> HOST.matcher(v).matches();
+            case INT -> v.matches("\\d{1,6}") && Integer.parseInt(v) >= s.min() && Integer.parseInt(v) <= s.max();
+            case BOOL -> v.equals("true") || v.equals("false");
+            case CALENDAR -> CALENDAR.matcher(v).matches() && validCalendar(v);
+            case SECRET -> v.length() >= 8 && v.length() <= 200 && v.chars().allMatch(c -> c >= 0x20 && c < 0x7f);
+        };
+        if (ok) return null;
+        return switch (s.kind()) {
+            case EMAIL -> "Not an email address";
+            case EMAILS -> "One or more email addresses, comma-separated";
+            case REPOS -> "One or more owner/repo, comma-separated";
+            case INT -> "A number from " + s.min() + " to " + s.max();
+            case CALENDAR -> "Not a systemd calendar time (try Mon *-*-* 08:00:00)";
+            case LOGIN -> "Not a GitHub login";
+            case HOST -> "Not a host name";
+            case SECRET -> "8 to 200 printable characters";
+            default -> "Not a valid value";
+        };
+    }
+
+    static boolean validCalendar(String v) {
+        try {
+            Process p = new ProcessBuilder("systemd-analyze", "calendar", "--", v).redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();
+            return p.waitFor(10, TimeUnit.SECONDS) && p.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static Map<String, String> readConfig(Path file) throws IOException {
+        Map<String, String> raw = new HashMap<>();
+        for (String line : Files.readAllLines(file)) {
+            String l = line.strip();
+            int eq = l.indexOf('=');
+            if (!l.startsWith("#") && eq > 0) raw.putIfAbsent(l.substring(0, eq).strip(), l.substring(eq + 1).strip());
+        }
+        return raw;
+    }
+
+    /** Sets each key's line (the first one, as the elves read it), or appends it; other lines stay as they are. */
+    static void writeConfig(Path file, Map<String, String> changes) throws IOException {
+        List<String> lines = new ArrayList<>(Files.readAllLines(file));
+        Map<String, String> left = new java.util.LinkedHashMap<>(changes);
+        for (int i = 0; i < lines.size(); i++) {
+            String l = lines.get(i).strip();
+            int eq = l.indexOf('=');
+            if (l.startsWith("#") || eq <= 0) continue;
+            String key = l.substring(0, eq).strip();
+            if (left.containsKey(key)) lines.set(i, key + "=" + left.remove(key));
+        }
+        left.forEach((k, v) -> lines.add(k + "=" + v));
+        Path tmp = file.resolveSibling(file.getFileName() + ".desk-new");
+        Files.write(tmp, lines);
+        Files.setPosixFilePermissions(tmp, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /** A drop-in for the timer with the new OnCalendar, then systemd picks it up. */
+    static void setTimer(String timer, String calendar) throws Exception {
+        Path dir = HOME.resolve(".config/systemd/user/" + timer + ".d");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("elf-desk.conf"), "# Set from Elf Desk's settings\n[Timer]\nOnCalendar=\nOnCalendar=" + calendar + "\n");
+        for (List<String> cmd : List.of(List.of("systemctl", "--user", "daemon-reload"),
+                List.of("systemctl", "--user", "restart", timer))) {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) throw new IOException(String.join(" ", cmd) + ": " + clip(out, 200));
+        }
     }
 
     // ---- daily-triage runs, for the desk ----
