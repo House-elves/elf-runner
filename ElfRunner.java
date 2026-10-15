@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.28.1"; // 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.29.0"; // 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -74,7 +74,7 @@ public class ElfRunner {
         if (args.length > 0 && args[0].equals("--sandbox-shell")) {
             // For checking the sandbox by hand: runs a command inside it, e.g. --sandbox-shell bash -c 'ls ~'
             List<String> cmd = args.length > 1 ? List.of(args).subList(1, args.length) : List.of("bash");
-            Process p = new ProcessBuilder(Sandbox.wrap(cfg, cmd, cfg.workDir.resolve("tmp"))).inheritIO().start();
+            Process p = new ProcessBuilder(Sandbox.wrap(cfg, cmd, cfg.workDir.resolve("tmp"), null)).inheritIO().start();
             System.exit(p.waitFor());
         }
         if (cfg.sandbox) log("Agents run in a bubblewrap sandbox" + (cfg.sandboxPodman ? " with Podman" : ""));
@@ -237,8 +237,11 @@ public class ElfRunner {
         if (cfg.model != null) cmd.addAll(List.of("--model", cfg.model));
         if (msg.path("session").isTextual()) cmd.addAll(List.of("--resume", msg.path("session").asText()));
 
+        Path files = cfg.workDir.resolve("files").resolve(String.valueOf(job));
+        deleteTree(files);
+        Files.createDirectories(files);
         event(job, "Starting Claude Code in " + wt);
-        Process p = agentProcess(cmd, wt).start();
+        Process p = agentProcess(cmd, wt, files).start();
         running.put(job, p);
         try (OutputStream in = p.getOutputStream()) {
             in.write(msg.path("prompt").asText().getBytes(StandardCharsets.UTF_8));
@@ -275,6 +278,7 @@ public class ElfRunner {
         fetchFromCache(wt, cacheDir(checkout.path("repo").asText()),
                 checkout.path("kind").asText().equals("PR") ? checkout.path("number").asInt() : 0);
         if (!running.containsKey(job)) return; // cancelled
+        sendFiles(job, files);
         if (result == null || result.path("is_error").asBoolean() || !result.path("structured_output").isObject()) {
             String why = result == null ? "Claude Code exited with code " + exit
                     : result.path("result").asText(result.path("subtype").asText("no structured answer"))
@@ -321,7 +325,11 @@ public class ElfRunner {
     static final String AGENT_RULES = """
             You are running headless for Elf Desk. Your structured answer is shown to a maintainer, who decides \
             what to post. You have no GitHub credentials and must not try to obtain any (don't read token files, \
-            keyrings or ~/.config/gh). Don't push, open PRs, comment or review on GitHub.""";
+            keyrings or ~/.config/gh). Don't push, open PRs, comment or review on GitHub. \
+            Files for the maintainer (screenshots, logs, reports) go in the directory $ELF_FILES, flat, as \
+            .png, .jpg, .gif, .webp, .txt, .md, .log, .csv, .json, .diff or .patch, at most 20 files of 10 MB each. \
+            The desk shows them with your answer and offers them as a zip; refer to them by file name. Anything you \
+            leave in /tmp or elsewhere outside the repo is gone when you finish.""";
 
     /** Short lines describing what the agent is doing, from one stream-json message. */
     static List<String> describe(JsonNode n) {
@@ -1808,12 +1816,64 @@ public class ElfRunner {
         if (p.exitValue() != 0) throw new IOException("git " + String.join(" ", args) + " failed: " + clip(out.strip(), 400));
     }
 
+    // ---- files from the agent ----
+
+    static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
+    static final Set<String> FILE_TYPES = Set.of("png", "jpg", "jpeg", "gif", "webp", "txt", "md", "log", "csv", "json",
+            "diff", "patch");
+    static final int MAX_FILES = 20;
+    static final long MAX_FILE = 10L * 1024 * 1024, MAX_FILES_TOTAL = 60L * 1024 * 1024;
+
+    /**
+     * Sends the files the agent left in its $ELF_FILES to the desk (one message each), then removes them. Only
+     * regular files at the top, with a plain name and a known type, within the limits; the rest is skipped and said.
+     */
+    void sendFiles(long job, Path dir) {
+        try {
+            if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) return;
+            List<Path> found;
+            try (var list = Files.list(dir)) {
+                found = list.sorted().toList();
+            }
+            int sent = 0;
+            long total = 0;
+            for (Path f : found) {
+                String name = f.getFileName().toString();
+                String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase(java.util.Locale.ROOT) : "";
+                long size = Files.isRegularFile(f, LinkOption.NOFOLLOW_LINKS) ? Files.size(f) : -1;
+                String skip = size < 0 ? "not a plain file" : !FILE_NAME.matcher(name).matches() ? "its name"
+                        : !FILE_TYPES.contains(ext) ? "its type" : size > MAX_FILE ? "over 10 MB"
+                        : sent == MAX_FILES ? "more than " + MAX_FILES + " files" : total + size > MAX_FILES_TOTAL ? "over 60 MB in all" : null;
+                if (skip != null) {
+                    event(job, "Didn't keep " + clip(name, 100) + " (" + skip + ")");
+                    continue;
+                }
+                byte[] data = Files.readAllBytes(f);
+                send(JSON.createObjectNode().put("type", "job.file").put("job", job).put("name", name)
+                        .put("data", java.util.Base64.getEncoder().encodeToString(data)));
+                sent++;
+                total += size;
+            }
+            if (sent > 0) event(job, "Kept " + sent + (sent == 1 ? " file" : " files") + " for you");
+        } catch (Exception e) {
+            event(job, "Couldn't keep the agent's files: " + rootMessage(e));
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
     // ---- processes ----
 
     /** Claude Code, inside the sandbox unless SANDBOX=none. */
     ProcessBuilder agentProcess(List<String> cmd, Path dir) {
-        List<String> full = cfg.sandbox ? Sandbox.wrap(cfg, cmd, dir) : cmd;
+        return agentProcess(cmd, dir, null);
+    }
+
+    /** With {@code files}: the job's own directory for files for the maintainer, as $ELF_FILES. */
+    ProcessBuilder agentProcess(List<String> cmd, Path dir, Path files) {
+        List<String> full = cfg.sandbox ? Sandbox.wrap(cfg, cmd, dir, files) : cmd;
         ProcessBuilder pb = new ProcessBuilder(full).directory(dir.toFile());
+        if (!cfg.sandbox && files != null) pb.environment().put("ELF_FILES", files.toString());
         pb.redirectError(ProcessBuilder.Redirect.appendTo(cfg.workDir.resolve("agent-stderr.log").toFile()));
         scrub(pb.environment());
         if (!cfg.sandbox) pb.environment().put("CLAUDE_CONFIG_DIR", cfg.claudeConfigDir.toString());
@@ -1965,7 +2025,7 @@ public class ElfRunner {
             return b;
         }
 
-        static List<String> wrap(Config cfg, List<String> cmd, Path cwd) {
+        static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files) {
             String home = System.getProperty("user.home");
             String runtime = System.getenv().getOrDefault("XDG_RUNTIME_DIR", "/run/user/" + uid());
             Path w = cfg.workDir;
@@ -1992,6 +2052,10 @@ public class ElfRunner {
             // Only this run's own directory (its item's clone, or the triage dir): never another item's clone.
             if (cwd.startsWith(w.resolve("worktrees")) || cwd.startsWith(w.resolve("triage")) || cwd.equals(w.resolve("tmp"))) {
                 b.addAll(List.of("--bind", cwd.toString(), cwd.toString()));
+            }
+            // The job's files for the maintainer: the only other place it writes that outlives it.
+            if (files != null) {
+                b.addAll(List.of("--bind", files.toString(), home + "/elf-files", "--setenv", "ELF_FILES", home + "/elf-files"));
             }
             b.addAll(claudeIsolation(cfg, cwd));
             String sdk = home + "/.sdkman/candidates";
