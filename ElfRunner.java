@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.26.0"; // 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.27.0"; // 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -357,6 +357,7 @@ public class ElfRunner {
     static final Pattern MERGE = Pattern.compile(REPO + "/pulls/\\d+/merge");
     static final Pattern RERUN = Pattern.compile(REPO + "/actions/runs/\\d+/rerun-failed-jobs");
     static final Pattern APPROVE = Pattern.compile(REPO + "/actions/runs/\\d+/approve");
+    static final Pattern PENDING_DEPLOYMENTS = Pattern.compile(REPO + "/actions/runs/\\d+/pending_deployments");
     static final Pattern ASSIGNEES = Pattern.compile(REPO + "/issues/\\d+/assignees");
     static final Pattern ISSUES = Pattern.compile(REPO + "/issues");
     static final Pattern PULLS = Pattern.compile(REPO + "/pulls");
@@ -370,7 +371,7 @@ public class ElfRunner {
      * Sends one write the desk asks for, with this machine's gh login for GITHUB_USER: the "GitHub CLI" app that
      * orgs already approve, the same as Claude Code. The desk only asks after you confirm in the page. Only the
      * requests in {@link #allowedWrite} are accepted (reviews, comments, new issues, close/reopen, assign yourself,
-     * merges pinned to a head, CI re-runs and approvals, PRs from your fork and syncing that fork). This runs in the runner
+     * merges pinned to a head, CI re-runs and approvals (fork runs and deployment environments), PRs from your fork and syncing that fork). This runs in the runner
      * process, never in the agent's sandbox.
      */
     void githubWrite(JsonNode msg) {
@@ -853,6 +854,13 @@ public class ElfRunner {
                     || (ISSUES.matcher(path).matches() && body.size() == 2 && body.path("title").isTextual()
                             && !body.path("title").asText().isBlank() && body.path("body").isTextual())
                     || ((RERUN.matcher(path).matches() || APPROVE.matcher(path).matches()) && body.isEmpty())
+                    // CI held at deployment environments you review: approve only (never reject), no comment.
+                    || (PENDING_DEPLOYMENTS.matcher(path).matches() && body.size() == 3
+                            && body.path("state").asText().equals("approved") && body.path("comment").asText("-").isEmpty()
+                            && body.path("environment_ids").isArray() && body.path("environment_ids").size() >= 1
+                            && body.path("environment_ids").size() <= 3
+                            && java.util.stream.StreamSupport.stream(body.path("environment_ids").spliterator(), false)
+                                    .allMatch(JsonNode::isIntegralNumber))
                     // A PR from your own fork's branch: title, body, head, base and draft (true, or false to open it
                     // ready for review), nothing else. You read the change in the desk before you click.
                     || (PULLS.matcher(path).matches() && body.size() == 5 && body.path("draft").isBoolean()
