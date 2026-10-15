@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.28.0"; // 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.28.1"; // 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -480,7 +480,7 @@ public class ElfRunner {
                     new Setting("GMAIL_ADDRESS", "Gmail account", "The inbox the email triage reads.", Kind.EMAIL),
                     new Setting("GMAIL_APP_PASSWORD", "Gmail app password", "From myaccount.google.com/apppasswords.", Kind.SECRET),
                     new Setting("MAX_EMAILS", "Emails per triage", "The most unread emails one triage looks at.", Kind.INT, 1, 500, null),
-                    new Setting("TRIAGE_LABEL", "Label for noise", "The Gmail label for what the triage marks read.", Kind.TEXT),
+                    new Setting("TRIAGE_LABEL", "Label for noise", "The Gmail label for what the triage marks read.", Kind.WORDS),
                     new Setting("ZULIP_SERVER_1", "Zulip server", "For example quarkusio.zulipchat.com.", Kind.HOST),
                     new Setting("ZULIP_EMAIL_1", "Zulip account", "The email you sign in to Zulip with.", Kind.EMAIL),
                     new Setting("ZULIP_API_KEY_1", "Zulip API key", "From Zulip: Personal settings, Account and privacy, API key.", Kind.SECRET),
@@ -506,8 +506,13 @@ public class ElfRunner {
                     new Setting("AGENT_MODEL", "Claude model", "Empty for the default.", Kind.TEXT))),
             "elf-runner", new ElfConfig(HOME.resolve(".config/elf-runner/config"), List.of(
                     new Setting("MAX_JOBS", "Agents at a time", "More use more memory. Applies when the runner restarts.", Kind.INT, 1, 4, null),
-                    new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240, null),
-                    new Setting("SANDBOX_PODMAN", "Podman in the sandbox", "Lets agents use Dev Services and Testcontainers. Applies when the runner restarts.", Kind.BOOL))));
+                    new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240, null))));
+    // Not SANDBOX_PODMAN: what the sandbox can reach is changed in the runner's config file only, never from the desk.
+
+    /** Each secret, and the settings it's tied to: changing one of those needs the secret again. */
+    static final Map<String, List<String>> SECRET_FOR = Map.of(
+            "GMAIL_APP_PASSWORD", List.of("GMAIL_ADDRESS"),
+            "ZULIP_API_KEY_1", List.of("ZULIP_SERVER_1", "ZULIP_EMAIL_1"));
 
     static final Pattern LOGIN = Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})");
     static final Pattern WORD = Pattern.compile("[A-Za-z0-9 ._*/+#&()-]{1,100}");
@@ -551,6 +556,18 @@ public class ElfRunner {
                         ? String.join(",", Arrays.stream(value.split(",")).map(String::strip).filter(x -> !x.isEmpty()).toList())
                         : value);
             }
+            // A secret belongs to the account and server it was given for: moving either needs the secret again,
+            // so the desk can never send a stored password or API key somewhere new.
+            Map<String, String> current = readConfig(config.file());
+            SECRET_FOR.forEach((secret, owners) -> {
+                if (config.settings().stream().noneMatch(x -> x.key().equals(secret))) return;
+                for (String owner : owners) {
+                    if (changes.containsKey(owner) && !changes.get(owner).equals(current.getOrDefault(owner, ""))
+                            && !changes.containsKey(secret)) {
+                        wrong.put(secret, "Enter it again: it goes with the account and server you changed");
+                    }
+                }
+            });
             if (!wrong.isEmpty()) {
                 result.put("status", 422).put("body", JSON.createObjectNode().set("wrong", JSON.valueToTree(wrong)).toString());
             } else {
@@ -651,8 +668,11 @@ public class ElfRunner {
         }
         left.forEach((k, v) -> lines.add(k + "=" + v));
         Path tmp = file.resolveSibling(file.getFileName() + ".desk-new");
+        Files.deleteIfExists(tmp);
+        // Owner-only from the start: the file holds secrets, so it's never readable by others, not even briefly.
+        Files.createFile(tmp, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));
         Files.write(tmp, lines);
-        Files.setPosixFilePermissions(tmp, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
         Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
     }
 
