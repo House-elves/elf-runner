@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.25.0"; // 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.26.0"; // 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -455,11 +455,18 @@ public class ElfRunner {
     static final Map<String, List<String>> TRIAGE_MODES = Map.of(
             "email", List.of("--triage-only", "--no-email"), // the email triage, shown in the desk, not emailed
             "zulip", List.of("--zulip-only"), // the last day of Zulip with a digest per topic; marks nothing read
-            "status", List.of("--save")); // weekly-status: this week's status as a draft; sends nothing
+            "status", List.of("--save"), // weekly-status: this week's status as a draft; sends nothing
+            "quarterly", List.of("--save")); // quarterly-review: a quarter's review, saved for the desk; sends nothing
     /** The elf each mode runs. */
     static String triageElf(String mode) {
-        return mode.equals("status") ? "weekly-status" : "daily-triage";
+        return switch (mode) {
+            case "status" -> "weekly-status";
+            case "quarterly" -> "quarterly-review";
+            default -> "daily-triage";
+        };
     }
+    /** The quarter a quarterly review is for: 2026-Q3. */
+    static final Pattern QUARTER = Pattern.compile("\\d{4}-Q[1-4]");
     static final String TRIAGE_UNIT = "daily-triage-desk-";
     final Object triageWatch = new Object();
     volatile boolean triageWatching;
@@ -484,6 +491,11 @@ public class ElfRunner {
                     "--description=" + triageElf(mode) + " " + mode + " for Elf Desk", "--property=Nice=10",
                     "--property=TimeoutStartSec=3h", "--setenv=PATH=" + System.getenv("PATH"), elf.toString()));
             cmd.addAll(args);
+            if (mode.equals("quarterly") && msg.hasNonNull("quarter")) {
+                String quarter = msg.path("quarter").asText();
+                if (!QUARTER.matcher(quarter).matches()) throw new IllegalArgumentException("Bad quarter");
+                cmd.add("--quarter=" + quarter);
+            }
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
             if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) {
