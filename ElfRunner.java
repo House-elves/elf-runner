@@ -53,7 +53,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.29.1"; // 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.29.2"; // 0.29.2: a job's answer fits the desk's message limit, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -149,12 +149,25 @@ public class ElfRunner {
         }
     }
 
+    /** The most the desk takes in one message (quarkus.websockets-next.server.max-message-size); over it, it hangs up. */
+    static final int MAX_MESSAGE = 2 * 1024 * 1024;
+
     void send(ObjectNode msg) {
         WebSocket ws = socket;
         if (ws == null) return; // the desk marks the job failed when we reconnect without it
         synchronized (sendLock) {
             try {
-                ws.sendText(JSON.writeValueAsString(msg), true).get(30, TimeUnit.SECONDS);
+                String text = JSON.writeValueAsString(msg);
+                int size = text.getBytes(StandardCharsets.UTF_8).length;
+                if (size > MAX_MESSAGE) {
+                    // Sending it would drop the connection (and with it every running job): say what didn't fit instead.
+                    log("Not sending " + msg.path("type").asText() + " of " + size + " bytes: over the desk's limit");
+                    if (!msg.path("job").isNumber()) return;
+                    text = JSON.writeValueAsString(JSON.createObjectNode().put("type", "job.failed")
+                            .put("job", msg.path("job").asLong()).put("error", "The answer was too big to send to the desk ("
+                                    + size / 1024 + " KB)."));
+                }
+                ws.sendText(text, true).get(30, TimeUnit.SECONDS);
             } catch (Exception e) {
                 log("Send failed: " + rootMessage(e));
             }
@@ -295,6 +308,7 @@ public class ElfRunner {
         done.set("git", !pr ? issueCommits(wt)
                 : !gitOut(wt, "rev-parse", "HEAD").equals(startSha) ? squashed(wt, checkout) : commitsSince(wt, startSha));
         if (result.path("total_cost_usd").isNumber()) done.put("cost", result.path("total_cost_usd").asDouble());
+        fitPatch(done);
         send(done);
         log("Job " + job + " done");
     }
@@ -1550,6 +1564,24 @@ public class ElfRunner {
      * Every byte as text: no textconv, external diff or "-diff" attribute can hide or rewrite what you review. Read
      * no further than the cap, so a huge change can't exhaust the runner's memory.
      */
+    /**
+     * A big change (a docs migration, say) can make the answer bigger than the desk takes in one message: the patch
+     * you read in the desk is then cut further, as at MAX_PATCH. What gets pushed is the commit, not this patch.
+     */
+    static void fitPatch(ObjectNode done) throws IOException {
+        if (!(done.path("git") instanceof ObjectNode git) || !git.path("patch").isTextual()) return;
+        int room = MAX_MESSAGE - 64 * 1024;
+        for (int i = 0; i < 8; i++) {
+            int size = JSON.writeValueAsBytes(done).length;
+            if (size <= room) return;
+            String patch = git.path("patch").asText();
+            int keep = (int) (patch.length() * ((double) room / size) * 0.98);
+            // Escaping (newlines, quotes, control characters) makes the bytes grow faster than the characters: check again.
+            git.put("patch", patch.substring(0, keep)).put("patchCut", true);
+        }
+        git.remove("patch");
+    }
+
     void putPatch(ObjectNode git, Path wt, String from, String to) {
         try {
             ProcessBuilder pb = new ProcessBuilder("git", "-c", "core.attributesFile=/dev/null", "diff", "--no-color",
