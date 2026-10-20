@@ -1,6 +1,8 @@
+<img src="https://raw.githubusercontent.com/House-elves/elf-desk/main/docs/brand/mark.svg" width="72" alt="House Elves logo: a checkmark that ends in an elf's hat">
+
 # elf-runner
 
-The [House Elf](https://github.com/House-elves) that runs [Elf Desk](../elf-desk)'s agent jobs on this machine.
+The [House Elf](https://github.com/House-elves) that runs [Elf Desk](https://github.com/House-elves/elf-desk)'s agent jobs on this machine.
 
 It dials out to the desk over a WebSocket (nothing connects in) and authenticates with a shared token. For each job it:
 
