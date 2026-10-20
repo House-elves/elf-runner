@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
@@ -53,7 +54,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.29.2"; // 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.29.3"; // 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
 
     final Config cfg;
@@ -268,7 +269,7 @@ public class ElfRunner {
         List<String> cmd = new ArrayList<>(List.of(cfg.claude, "-p", "--output-format", "stream-json", "--verbose",
                 "--json-schema", msg.path("schema").asText(), "--dangerously-skip-permissions",
                 "--strict-mcp-config", "--mcp-config", cfg.mcpConfig.toString(),
-                "--append-system-prompt", AGENT_RULES));
+                "--append-system-prompt", AGENT_RULES + timeRule(cfg.timeoutMinutes)));
         if (cfg.model != null) cmd.addAll(List.of("--model", cfg.model));
         if (msg.path("session").isTextual()) cmd.addAll(List.of("--resume", msg.path("session").asText()));
 
@@ -283,11 +284,13 @@ public class ElfRunner {
         }
 
         JsonNode result = null;
+        AtomicBoolean timedOut = new AtomicBoolean();
         try (BufferedReader out = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
             Thread watchdog = Thread.ofVirtual().start(() -> {
                 try {
                     if (!p.waitFor(cfg.timeoutMinutes, TimeUnit.MINUTES)) {
                         event(job, "Timed out after " + cfg.timeoutMinutes + " minutes; stopping.");
+                        timedOut.set(true);
                         kill(p);
                     }
                 } catch (InterruptedException ignored) {
@@ -315,7 +318,9 @@ public class ElfRunner {
         if (!running.containsKey(job)) return; // cancelled
         sendFiles(job, files);
         if (result == null || result.path("is_error").asBoolean() || !result.path("structured_output").isObject()) {
-            String why = result == null ? "Claude Code exited with code " + exit
+            String why = result == null && timedOut.get()
+                    ? "It ran out of time: stopped after " + cfg.timeoutMinutes + " minutes (JOB_TIMEOUT_MINUTES) before it answered"
+                    : result == null ? "Claude Code exited with code " + exit
                     : result.path("result").asText(result.path("subtype").asText("no structured answer"))
                             + loginHint(result);
             failed(job, why);
@@ -366,6 +371,14 @@ public class ElfRunner {
             .png, .jpg, .gif, .webp, .txt, .md, .log, .csv, .json, .diff or .patch, at most 20 files of 10 MB each. \
             The desk shows them with your answer and offers them as a zip; refer to them by file name. Anything you \
             leave in /tmp or elsewhere outside the repo is gone when you finish.""";
+
+    /** The job's time limit, so the agent leaves room to answer instead of being stopped mid-build. */
+    static String timeRule(int minutes) {
+        return " You have " + minutes + " minutes in all. After that you are stopped and nothing you found reaches "
+                + "the maintainer, so leave time to write your answer: don't start a build or test run that may not "
+                + "finish in time (a full build of a large project, or of another project from source). Answer with "
+                + "what you have, and the command the maintainer could run to find out more.";
+    }
 
     /** Short lines describing what the agent is doing, from one stream-json message. */
     static List<String> describe(JsonNode n) {
