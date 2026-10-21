@@ -45,9 +45,44 @@ class Elves {
     /** Names an elf can't take: House Elves' own, and the folders under ~/.config that hold logins. */
     static final Set<String> RESERVED = Set.of("house-elves", "elf-runner", "elf-desk", "gh", "git", "systemd", "jbang", "claude");
     static final Pattern TOOL = Pattern.compile("[a-z0-9][a-z0-9.-]{0,30}");
+    /** A command's param becomes an option: --name=value. An action's goes in JSON, so it may be camelCase. */
+    static final Pattern COMMAND_PARAM = Pattern.compile("[a-z][a-z0-9-]{0,40}");
+    static final Pattern ACTION_PARAM = Pattern.compile("[a-z][A-Za-z0-9]{0,40}");
+    static final Pattern OPTION_VALUE = Pattern.compile("[A-Za-z0-9._:-]{1,80}");
+    /** A folder in the elf's ~/.config/<name>/ (never the config file), and the files its UI may read in it. */
+    static final Pattern FOLDER = Pattern.compile("[a-z0-9][a-z0-9_-]{0,40}");
+    static final Pattern FILE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,120}");
+    /** A file of the elf's UI: under ui/, plain names, and only what a page loads. */
+    static final Pattern UI_FILE = Pattern.compile("ui(/[A-Za-z0-9_-][A-Za-z0-9._-]{0,80}){1,6}");
+    static final Pattern UI_EXT = Pattern.compile(".*\\.(js|css|json|svg|png|jpg|webp|woff2)");
 
-    /** What the desk may run: a name, a label for its button, and the fixed arguments it gets. */
-    record Command(String name, String label, List<String> args) {
+    /**
+     * What the desk may run: a name, a label for its button, and the fixed arguments it gets. Its params (a quarter,
+     * say) are added as {@code --name=value}, each checked against the elf.yaml's pattern first.
+     */
+    record Command(String name, String label, List<String> args, Map<String, Param> params) {
+    }
+
+    /**
+     * Something an elf's own UI may ask for with values (mark this email read, send this draft): the fixed
+     * arguments, and the values as JSON on the elf's stdin, each checked first. {@code ask}: the desk shows its
+     * confirm bar first (with {@code confirm}, or the label), unless the elf.yaml says {@code ask: false}.
+     */
+    record Action(String name, String label, List<String> args, Map<String, Param> params, boolean ask, String confirm) {
+    }
+
+    /**
+     * A value a command or action takes. kind: text (up to max characters, matching pattern if there is one),
+     * email, int, ints (a list of positive numbers, up to max), bool; or one of a fixed list.
+     */
+    record Param(String name, String kind, int max, Pattern pattern, List<String> oneOf, boolean optional) {
+    }
+
+    /**
+     * A tab on the desk drawn by the elf's own UI: {@code page} is a module in its ui/ folder, run in a sandboxed
+     * frame. {@code card}: it also has a card on the dashboard; {@code refresh}: the command Refresh everything runs.
+     */
+    record Tab(String name, String label, String page, boolean card, String refresh) {
     }
 
     /** A schedule: the command, and the setting that holds when (or the fallback if there's no such setting). */
@@ -57,7 +92,13 @@ class Elves {
     /** One elf's elf.yaml, checked. */
     record Manifest(String name, String description, String main, Path config, List<String> tools,
             List<ElfRunner.Setting> settings, Map<String, Command> commands, Schedule schedule, String dryRun,
-            List<String> reads, List<String> writes) {
+            List<String> reads, List<String> writes, List<String> data, List<Tab> tabs, Map<String, Action> actions) {
+
+        /** The folder in ~/.config/<name>/ that its UI may read. */
+        Path data(String folder) {
+            if (!data.contains(folder)) throw new IllegalArgumentException(name + "'s UI doesn't read " + folder);
+            return config.getParent().resolve(folder);
+        }
     }
 
     /** An installed elf: its manifest, folder, repo and the commit it's at. */
@@ -129,7 +170,48 @@ class Elves {
                 if (!ARG.matcher(a.asText()).matches()) throw new IOException("elf.yaml: " + f.getKey() + " has an argument that isn't a plain option");
                 args.add(a.asText());
             }
-            commands.put(f.getKey(), new Command(f.getKey(), clip(f.getValue().path("label").asText(f.getKey()), 80), List.copyOf(args)));
+            Map<String, Param> params = params(f.getKey(), f.getValue().path("params"), true);
+            commands.put(f.getKey(), new Command(f.getKey(), clip(f.getValue().path("label").asText(f.getKey()), 80), List.copyOf(args), params));
+        }
+
+        Map<String, Action> actions = new LinkedHashMap<>();
+        var acts = y.path("actions").fields();
+        while (acts.hasNext()) {
+            var f = acts.next();
+            if (!NAME.matcher(f.getKey()).matches()) throw new IOException("elf.yaml: action names are lowercase: " + f.getKey());
+            JsonNode a = f.getValue();
+            List<String> args = new ArrayList<>();
+            for (JsonNode x : a.path("args")) {
+                if (!ARG.matcher(x.asText()).matches()) throw new IOException("elf.yaml: " + f.getKey() + " has an argument that isn't a plain option");
+                args.add(x.asText());
+            }
+            if (args.isEmpty()) throw new IOException("elf.yaml: the action " + f.getKey() + " has no args");
+            boolean ask = !a.path("ask").isBoolean() || a.path("ask").asBoolean();
+            String label = clip(a.path("label").asText(f.getKey()), 80);
+            actions.put(f.getKey(), new Action(f.getKey(), label, List.copyOf(args), params(f.getKey(), a.path("params"), false), ask,
+                    clip(a.path("confirm").asText(label), 200)));
+        }
+
+        List<String> data = new ArrayList<>();
+        for (JsonNode d : y.path("data")) {
+            if (!FOLDER.matcher(d.asText()).matches() || d.asText().equals("config")) {
+                throw new IOException("elf.yaml: data names folders in ~/.config/" + name + "/");
+            }
+            data.add(d.asText());
+        }
+
+        List<Tab> tabs = new ArrayList<>();
+        for (JsonNode t : y.path("tabs")) {
+            String tab = text(t, "name"), page = text(t, "page");
+            if (!NAME.matcher(tab).matches()) throw new IOException("elf.yaml: tab names are lowercase: " + tab);
+            if (tabs.stream().anyMatch(x -> x.name().equals(tab))) throw new IOException("elf.yaml: two tabs are called " + tab);
+            if (!UI_FILE.matcher(page).matches() || !page.endsWith(".js")) throw new IOException("elf.yaml: a tab's page is a .js file in ui/");
+            if (folder != null && !Files.isRegularFile(folder.resolve(page))) throw new IOException("elf.yaml: there's no " + page);
+            String refresh = t.path("refresh").asText(null);
+            if (refresh != null && (!commands.containsKey(refresh) || !commands.get(refresh).params().isEmpty())) {
+                throw new IOException("elf.yaml: the tab " + tab + " refreshes with an unknown command");
+            }
+            tabs.add(new Tab(tab, clip(t.path("label").asText(tab), 40), page, t.path("card").asBoolean(false), refresh));
         }
 
         Schedule schedule = null;
@@ -142,6 +224,9 @@ class Elves {
                     .map(ElfRunner.Setting::dflt).findFirst().orElseThrow(() -> new IOException("elf.yaml: the schedule's setting isn't a setting"))
                     : sch.fallback();
             if (value != null && Calendar.parse(value) == null) throw new IOException("elf.yaml: the schedule isn't a calendar time");
+            if (commands.get(sch.command()).params().values().stream().anyMatch(x -> !x.optional())) {
+                throw new IOException("elf.yaml: the schedule's command needs values nobody gives it");
+            }
         }
         String dryRun = y.path("dry-run").asText(null);
         if (dryRun != null && !commands.containsKey(dryRun)) throw new IOException("elf.yaml: dry-run names an unknown command");
@@ -152,7 +237,100 @@ class Elves {
             tools.add(t.asText());
         }
         return new Manifest(name, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
-                List.copyOf(settings), commands, schedule, dryRun, lines(y.path("reads")), lines(y.path("writes")));
+                List.copyOf(settings), commands, schedule, dryRun, lines(y.path("reads")), lines(y.path("writes")),
+                List.copyOf(data), List.copyOf(tabs), actions);
+    }
+
+    /** A command's or action's params. A command's are options, so each needs a pattern or a list to be one of. */
+    static Map<String, Param> params(String owner, JsonNode n, boolean command) throws IOException {
+        Map<String, Param> out = new LinkedHashMap<>();
+        var fields = n.fields();
+        while (fields.hasNext()) {
+            var f = fields.next();
+            String name = f.getKey();
+            JsonNode p = f.getValue();
+            if (!(command ? COMMAND_PARAM : ACTION_PARAM).matcher(name).matches()) throw new IOException("elf.yaml: " + owner + " has a bad param name: " + name);
+            List<String> oneOf = new ArrayList<>();
+            p.path("one-of").forEach(x -> oneOf.add(x.asText()));
+            String kind = p.path("kind").asText(oneOf.isEmpty() ? "text" : "one-of");
+            if (!Set.of("text", "email", "int", "ints", "bool", "one-of").contains(kind)) throw new IOException("elf.yaml: " + owner + "." + name + " has an unknown kind");
+            if (kind.equals("one-of") && oneOf.isEmpty()) throw new IOException("elf.yaml: " + owner + "." + name + " lists nothing to be one of");
+            Pattern pattern;
+            try {
+                pattern = p.hasNonNull("pattern") ? Pattern.compile(p.path("pattern").asText()) : null;
+            } catch (Exception e) {
+                throw new IOException("elf.yaml: " + owner + "." + name + " has a bad pattern");
+            }
+            int max = Math.min(p.path("max").asInt(kind.equals("ints") ? 100 : 200), kind.equals("ints") ? 1000 : 200_000);
+            if (command) {
+                if (pattern == null && oneOf.isEmpty()) throw new IOException("elf.yaml: " + owner + "." + name + " needs a pattern or one-of");
+                if (oneOf.stream().anyMatch(x -> !OPTION_VALUE.matcher(x).matches())) throw new IOException("elf.yaml: " + owner + "." + name + " lists a value that can't be an option");
+                if (!kind.equals("text") && !kind.equals("one-of")) throw new IOException("elf.yaml: a command's params are text");
+            }
+            out.put(name, new Param(name, kind, max, pattern, List.copyOf(oneOf), p.path("optional").asBoolean(false)));
+        }
+        return out;
+    }
+
+    /** The values given for params, checked: only declared ones, each the right kind. */
+    static ObjectNode values(Map<String, Param> params, JsonNode given) {
+        ObjectNode out = ElfRunner.JSON.createObjectNode();
+        if (given != null && !given.isMissingNode() && !given.isNull()) {
+            if (!given.isObject()) throw new IllegalArgumentException("Bad values");
+            given.fieldNames().forEachRemaining(k -> {
+                if (!params.containsKey(k)) throw new IllegalArgumentException("Not a value it takes: " + k);
+            });
+        }
+        for (Param p : params.values()) {
+            JsonNode v = given == null ? null : given.get(p.name());
+            if (v == null || v.isNull()) {
+                if (!p.optional()) throw new IllegalArgumentException(p.name() + " is missing");
+                continue;
+            }
+            String bad = p.name() + " isn't valid";
+            switch (p.kind()) {
+                case "int" -> {
+                    if (!v.isIntegralNumber()) throw new IllegalArgumentException(bad);
+                    out.put(p.name(), v.asLong());
+                }
+                case "bool" -> {
+                    if (!v.isBoolean()) throw new IllegalArgumentException(bad);
+                    out.put(p.name(), v.asBoolean());
+                }
+                case "ints" -> {
+                    if (!v.isArray() || v.size() > p.max()) throw new IllegalArgumentException(bad);
+                    var a = out.putArray(p.name());
+                    for (JsonNode x : v) {
+                        if (!x.isIntegralNumber() || x.asLong() <= 0) throw new IllegalArgumentException(bad);
+                        a.add(x.asLong());
+                    }
+                }
+                default -> {
+                    if (!v.isTextual()) throw new IllegalArgumentException(bad);
+                    String s = v.asText();
+                    boolean ok = switch (p.kind()) {
+                        case "one-of" -> p.oneOf().contains(s);
+                        case "email" -> ElfRunner.EMAIL.matcher(s).matches();
+                        default -> s.length() <= p.max() && (p.pattern() == null || p.pattern().matcher(s).matches());
+                    };
+                    if (!ok || s.chars().anyMatch(c -> c == 0)) throw new IllegalArgumentException(bad);
+                    out.put(p.name(), s);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** A command's arguments with its params' values as options, each checked. */
+    static List<String> args(Command c, JsonNode given) {
+        ObjectNode v = values(c.params(), given);
+        List<String> args = new ArrayList<>(c.args());
+        v.fields().forEachRemaining(f -> {
+            String value = f.getValue().asText();
+            if (!OPTION_VALUE.matcher(value).matches()) throw new IllegalArgumentException(f.getKey() + " isn't valid");
+            args.add("--" + f.getKey() + "=" + value);
+        });
+        return args;
     }
 
     static String text(JsonNode n, String field) throws IOException {
@@ -598,6 +776,88 @@ class Elves {
         });
     }
 
+    // ---- what an elf's UI reads ----
+
+    static final int MAX_UI_FILE = 2 * 1024 * 1024, MAX_READ = 1536 * 1024, MAX_LISTED = 500;
+
+    /** A file of the elf's UI, from ui/ at the installed commit. */
+    static byte[] uiFile(Installed i, String path) throws IOException {
+        if (path == null || !UI_FILE.matcher(path).matches() || !UI_EXT.matcher(path).matches()) {
+            throw new IllegalArgumentException("Not a file of its UI");
+        }
+        Path f = inside(i.dir().resolve("ui"), i.dir().resolve(path));
+        if (Files.size(f) > MAX_UI_FILE) throw new IOException(path + " is too big");
+        return Files.readAllBytes(f);
+    }
+
+    /** The files in one of the elf's data folders, newest first: name, size, modified. */
+    ObjectNode list(Installed i, String folder) throws IOException {
+        Path dir = i.manifest().data(folder);
+        ObjectNode out = ElfRunner.JSON.createObjectNode();
+        var files = out.putArray("files");
+        if (!Files.isDirectory(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return out;
+        record F(String name, long size, Instant modified) {
+        }
+        List<F> found = new ArrayList<>();
+        try (var list = Files.list(dir)) {
+            for (Path f : list.toList()) {
+                String n = f.getFileName().toString();
+                if (!FILE.matcher(n).matches() || !Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
+                found.add(new F(n, Files.size(f), Files.getLastModifiedTime(f).toInstant()));
+            }
+        }
+        found.sort(java.util.Comparator.comparing(F::name).reversed());
+        found.stream().limit(MAX_LISTED).forEach(f -> files.addObject().put("name", f.name()).put("size", f.size())
+                .put("modified", f.modified().toString()));
+        out.put("more", found.size() > MAX_LISTED);
+        return out;
+    }
+
+    /**
+     * Files from one of its data folders: {files: {name: text}}, or with {@code fields} (JSON files only) just those
+     * top-level fields of each, for a list of runs. A missing file is left out.
+     */
+    ObjectNode read(Installed i, String folder, JsonNode names, JsonNode fields) throws IOException {
+        Path dir = i.manifest().data(folder);
+        if (!names.isArray() || names.isEmpty() || names.size() > 100) throw new IllegalArgumentException("Name 1 to 100 files");
+        ObjectNode out = ElfRunner.JSON.createObjectNode();
+        ObjectNode files = out.putObject("files");
+        long total = 0;
+        for (JsonNode n : names) {
+            String name = n.asText();
+            if (!FILE.matcher(name).matches()) throw new IllegalArgumentException("Bad file name: " + name);
+            Path f = dir.resolve(name);
+            if (!Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
+            inside(dir, f);
+            if (fields != null && fields.isArray() && !fields.isEmpty()) {
+                ObjectNode picked = files.putObject(name);
+                try {
+                    JsonNode all = ElfRunner.JSON.readTree(f.toFile());
+                    for (JsonNode k : fields) {
+                        if (all.has(k.asText())) picked.set(k.asText(), all.get(k.asText()));
+                    }
+                } catch (IOException e) {
+                    picked.put("unreadable", true);
+                }
+                total += picked.toString().length();
+            } else {
+                total += Files.size(f);
+                if (total > MAX_READ) throw new IOException("That's too much to read at once");
+                files.put(name, Files.readString(f));
+            }
+            if (total > MAX_READ) throw new IOException("That's too much to read at once");
+        }
+        return out;
+    }
+
+    /** {@code f}, once it's sure to be a regular file in {@code dir} with no link leading out. */
+    static Path inside(Path dir, Path f) throws IOException {
+        if (!Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new IOException("No such file");
+        Path real = f.toRealPath();
+        if (!real.startsWith(dir.toRealPath())) throw new IOException("No such file");
+        return real;
+    }
+
     // ---- what the desk sees ----
 
     ObjectNode view(Installed i) {
@@ -609,6 +869,23 @@ class Elves {
         for (String t : m.tools()) tools.addObject().put("name", t).put("found", ElfRunner.which(t) != null);
         var commands = n.putArray("commands");
         m.commands().values().forEach(c -> commands.addObject().put("name", c.name()).put("label", c.label()));
+        m.commands().values().forEach(c -> {
+            if (!c.params().isEmpty()) {
+                ObjectNode cmd = null;
+                for (JsonNode x : commands) if (x.path("name").asText().equals(c.name())) cmd = (ObjectNode) x;
+                var ps = cmd.putArray("params");
+                c.params().keySet().forEach(ps::add);
+            }
+        });
+        var actions = n.putArray("actions");
+        m.actions().values().forEach(a -> actions.addObject().put("name", a.name()).put("label", a.label()).put("ask", a.ask())
+                .put("confirm", a.confirm()));
+        var tabs = n.putArray("tabs");
+        m.tabs().forEach(t -> {
+            ObjectNode x = tabs.addObject().put("name", t.name()).put("label", t.label()).put("page", t.page()).put("card", t.card());
+            if (t.refresh() != null) x.put("refresh", t.refresh());
+        });
+        m.data().forEach(n.putArray("data")::add);
         if (m.dryRun() != null) n.put("dryRun", m.dryRun());
         m.reads().forEach(n.putArray("reads")::add);
         m.writes().forEach(n.putArray("writes")::add);

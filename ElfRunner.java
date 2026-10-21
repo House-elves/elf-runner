@@ -56,7 +56,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.30.2"; // 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.31.0"; // 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -73,10 +73,7 @@ public class ElfRunner {
         this.cfg = cfg;
         this.slots = new Semaphore(cfg.maxJobs);
         this.elves = new Elves(Config.DATA, cfg.githubUser);
-        elves.onChange = () -> {
-            sendTriageState();
-            sendElvesState();
-        };
+        elves.onChange = this::sendElvesState;
     }
 
     public static void main(String[] args) throws Exception {
@@ -117,7 +114,6 @@ public class ElfRunner {
                 send(hello);
                 log("Connected to " + cfg.deskUrl);
                 sendMvnpmState();
-                sendTriageState();
                 sendElvesState();
                 backoff = 1;
                 closed.await();
@@ -223,10 +219,6 @@ public class ElfRunner {
                 case "github.updateBranch" -> updateBranch(msg);
                 case "github.ready" -> readyForReview(msg);
                 case "mvnpm.run" -> mvnpmRun(msg);
-                case "triage.run" -> triageRun(msg);
-                case "triage.markRead" -> triageMarkRead(msg);
-                case "triage.zulipRead" -> triageZulipRead(msg);
-                case "status.send" -> statusSend(msg);
                 case "elf.config" -> elfConfig(msg);
                 case "elf.configSet" -> elfConfigSet(msg);
                 case "elves.list" -> elvesList(msg);
@@ -235,6 +227,10 @@ public class ElfRunner {
                 case "elf.remove" -> elfRemove(msg);
                 case "elf.changes" -> elfChanges(msg);
                 case "elf.run" -> elfRun(msg);
+                case "elf.file" -> elfFile(msg);
+                case "elf.data" -> elfData(msg);
+                case "elf.read" -> elfRead(msg);
+                case "elf.action" -> elfAction(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -763,13 +759,16 @@ public class ElfRunner {
         });
     }
 
-    /** Runs one of the commands an elf's elf.yaml declares, with its fixed arguments: nothing comes from the desk. */
+    /**
+     * Runs one of the commands an elf's elf.yaml declares, in the background: its fixed arguments, plus the values
+     * of its params as options, each checked against the elf.yaml's pattern.
+     */
     void elfRun(JsonNode msg) {
         elvesAnswer(msg, () -> {
             Elves.Installed i = elves.get(msg.path("elf").asText(""));
             Elves.Command c = i.manifest().commands().get(msg.path("command").asText(""));
             if (c == null) throw new IllegalArgumentException("Not one of " + i.manifest().name() + "'s commands");
-            elves.start(i.manifest().name() + ":" + c.name(), i.manifest().name(), c.args());
+            elves.start(i.manifest().name() + ":" + c.name(), i.manifest().name(), Elves.args(c, msg.path("params")));
             return elvesView();
         });
     }
@@ -788,159 +787,77 @@ public class ElfRunner {
         send(result);
     }
 
-    /** Tells the desk the elves changed (a run started or ended), so the Elves page refreshes. */
+    /**
+     * Tells the desk the elves changed (a run started or ended), so the Elves page and the elves' tabs refresh: the
+     * runs going now, and the end of the log of each whose last run failed.
+     */
     void sendElvesState() {
         ObjectNode msg = JSON.createObjectNode().put("type", "elves.state");
         elves.runningKeys().forEach(msg.putArray("running")::add);
         if (!msg.has("running")) msg.putArray("running");
+        ObjectNode failed = msg.putObject("failed");
+        elves.failed().forEach(failed::put);
         send(msg);
     }
 
-    // ---- daily-triage runs, for the desk ----
-
-    /** What the desk may ask daily-triage for, and the arguments each run gets: nothing else is ever passed. */
-    static final Map<String, List<String>> TRIAGE_MODES = Map.of(
-            "email", List.of("--triage-only", "--no-email"), // the email triage, shown in the desk, not emailed
-            "zulip", List.of("--zulip-only"), // the last day of Zulip with a digest per topic; marks nothing read
-            "status", List.of("--save"), // weekly-status: this week's status as a draft; sends nothing
-            "quarterly", List.of("--save")); // quarterly-review: a quarter's review, saved for the desk; sends nothing
-    /** The elf each mode runs. */
-    static String triageElf(String mode) {
-        return switch (mode) {
-            case "status" -> "weekly-status";
-            case "quarterly" -> "quarterly-review";
-            default -> "daily-triage";
-        };
-    }
-    /** The quarter a quarterly review is for: 2026-Q3. */
-    static final Pattern QUARTER = Pattern.compile("\\d{4}-Q[1-4]");
-
-    /**
-     * Starts a built-in tab's run (email, zulip, status, quarterly) in the background. The elf saves the run in its
-     * own folder under ~/.config, where the desk reads it. A failed run stays failed (the end of its log shown on the
-     * desk) until the next run of that mode.
-     */
-    void triageRun(JsonNode msg) {
-        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
-        try {
-            String mode = msg.path("mode").asText("");
-            List<String> args = TRIAGE_MODES.get(mode);
-            if (args == null) throw new IllegalArgumentException("Bad daily-triage mode");
-            args = new ArrayList<>(args);
-            if (mode.equals("quarterly") && msg.hasNonNull("quarter")) {
-                String quarter = msg.path("quarter").asText();
-                if (!QUARTER.matcher(quarter).matches()) throw new IllegalArgumentException("Bad quarter");
-                args.add("--quarter=" + quarter);
-            }
-            elves.start(mode, triageElf(mode), args);
-            result.put("status", 200).put("body", "{}");
-        } catch (Exception e) {
-            result.put("status", 0).put("error", rootMessage(e));
-        }
-        send(result);
-    }
+    // ---- what an elf's own UI asks for (through the desk, which draws it in a sandboxed frame) ----
 
     static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@[A-Za-z0-9.-]{1,190}");
-    /** daily-triage checks it again; nothing that could leave the argument or break its IMAP command. */
-    // Printable ASCII only, never starting with "-" (it would read as an option)
-    static final Pattern MESSAGE_ID = Pattern.compile("<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?");
-
-    /**
-     * The desk's Done on an email: daily-triage marks that message's INBOX thread read in one of its own Gmail
-     * accounts (it has the credentials; the desk doesn't). Answers with how many messages it marked.
-     */
-    void triageMarkRead(JsonNode msg) {
-        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
-        try {
-            String account = msg.path("account").asText("");
-            String messageId = msg.path("messageId").asText("");
-            if (!EMAIL.matcher(account).matches()) throw new IllegalArgumentException("Bad account");
-            if (!MESSAGE_ID.matcher(messageId).matches()) throw new IllegalArgumentException("Bad Message-ID");
-            String last = runTriage(List.of("--mark-read=" + account, "--message-id=" + messageId));
-            result.put("status", 200).put("body", last);
-            log("Marked an email thread read in " + account);
-        } catch (Exception e) {
-            result.put("status", 0).put("error", rootMessage(e));
-        }
-        send(result);
-    }
-
     static final Pattern HOST = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]{0,252}");
 
-    /**
-     * The desk's Done on a Zulip topic: daily-triage (which holds the API key) marks the topic's unread messages
-     * read, and/or the given message ids. Stream and topic go to Zulip's API as JSON, never into a command line
-     * other than as attached option values.
-     */
-    void triageZulipRead(JsonNode msg) {
-        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
-        try {
-            String server = msg.path("server").asText("");
-            if (!HOST.matcher(server).matches()) throw new IllegalArgumentException("Bad Zulip server");
-            List<String> args = new ArrayList<>(List.of("--zulip-read=" + server));
-            if (msg.hasNonNull("stream")) {
-                String stream = msg.path("stream").asText(""), topic = msg.path("topic").asText("");
-                for (String s : List.of(stream, topic)) {
-                    if (s.length() > 200 || s.chars().anyMatch(Character::isISOControl)) throw new IllegalArgumentException("Bad stream or topic");
-                }
-                if (stream.isBlank()) throw new IllegalArgumentException("Bad stream");
-                args.add("--stream=" + stream);
-                args.add("--topic=" + topic);
-            }
-            JsonNode ids = msg.path("messages");
-            if (ids.size() > 500) throw new IllegalArgumentException("Too many messages");
-            for (JsonNode id : ids) {
-                if (!id.isIntegralNumber() || id.asLong() <= 0) throw new IllegalArgumentException("Bad message id");
-                args.add("--zulip-message=" + id.asLong());
-            }
-            if (args.size() == 1) throw new IllegalArgumentException("Nothing to mark read");
-            result.put("status", 200).put("body", runTriage(args));
-            log("Marked Zulip messages read on " + server);
-        } catch (Exception e) {
-            result.put("status", 0).put("error", rootMessage(e));
-        }
-        send(result);
+    /** A file of an elf's UI (ui/ at the installed commit), base64. */
+    void elfFile(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            Elves.Installed i = elves.get(msg.path("elf").asText(""));
+            return JSON.createObjectNode().put("commit", i.commit())
+                    .put("data", java.util.Base64.getEncoder().encodeToString(Elves.uiFile(i, msg.path("path").asText(null))));
+        });
     }
 
-    static final Pattern STATUS_ID = Pattern.compile("\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}");
+    /** The files in one of the folders an elf's elf.yaml lets its UI read. */
+    void elfData(JsonNode msg) {
+        elvesAnswer(msg, () -> elves.list(elves.get(msg.path("elf").asText("")), msg.path("folder").asText("")));
+    }
+
+    void elfRead(JsonNode msg) {
+        elvesAnswer(msg, () -> elves.read(elves.get(msg.path("elf").asText("")), msg.path("folder").asText(""),
+                msg.path("files"), msg.path("fields")));
+    }
 
     /**
-     * The desk's Send on the weekly status: weekly-status sends its saved draft {@code draft} with your edited
-     * {@code body} (on its stdin) to {@code target}, me or team (the addresses are in its own config), and records
-     * that it went out.
+     * One of the actions an elf's elf.yaml declares, with values from its UI: the fixed arguments, and the values
+     * (each checked against the elf.yaml) as JSON on its stdin. Answers with its last output line: JSON if it is.
      */
-    void statusSend(JsonNode msg) {
-        ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
-        try {
-            String draft = msg.path("draft").asText("");
-            String body = msg.path("body").asText("");
-            String target = msg.path("target").asText("me");
-            if (!STATUS_ID.matcher(draft).matches()) throw new IllegalArgumentException("Bad draft id");
-            if (!target.equals("me") && !target.equals("team")) throw new IllegalArgumentException("Bad target");
-            if (body.isBlank() || body.length() > 100_000) throw new IllegalArgumentException("The status is empty or too long");
-            result.put("status", 200).put("body", runElf("weekly-status", List.of("--send=" + draft, "--to=" + target), body));
-            log("Sent the weekly status " + draft + " to " + target);
-        } catch (Exception e) {
-            result.put("status", 0).put("error", rootMessage(e));
-        }
-        send(result);
+    void elfAction(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            Elves.Installed i = elves.get(msg.path("elf").asText(""));
+            Elves.Action a = i.manifest().actions().get(msg.path("action").asText(""));
+            if (a == null) throw new IllegalArgumentException("Not one of " + i.manifest().name() + "'s actions");
+            ObjectNode values = Elves.values(a.params(), msg.path("params"));
+            String last = runElf(i.manifest().name(), a.args(), JSON.writeValueAsString(values));
+            log(i.manifest().name() + ": " + a.name());
+            ObjectNode out = JSON.createObjectNode();
+            try {
+                JsonNode parsed = JSON.readTree(last);
+                out.set("result", parsed == null ? JSON.nullNode() : parsed);
+            } catch (Exception e) {
+                out.put("result", clip(last, 2000));
+            }
+            return out;
+        });
     }
 
-    /** daily-triage with these arguments, waited for: its last output line, or its output as the error. */
-    String runTriage(List<String> args) throws Exception {
-        return runElf("daily-triage", args, null);
-    }
-
+    /** An elf with these arguments and stdin, waited for: its last output line, or its output as the error. */
     String runElf(String name, List<String> args, String stdin) throws Exception {
         List<String> cmd = new ArrayList<>(elves.command(name));
         cmd.addAll(args);
         Path log = Files.createTempFile("elf-" + name, ".log");
         try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+            Process p = new ProcessBuilder(cmd).directory(HOME.toFile()).redirectErrorStream(true).redirectOutput(log.toFile()).start();
             try (var in = p.getOutputStream()) {
                 if (stdin != null) in.write(stdin.getBytes(StandardCharsets.UTF_8));
             }
-            if (!p.waitFor(120, TimeUnit.SECONDS)) {
+            if (!p.waitFor(150, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 throw new IOException(name + " took too long");
             }
@@ -950,23 +867,6 @@ public class ElfRunner {
         } finally {
             Files.deleteIfExists(log);
         }
-    }
-
-    /** The built-in tabs' modes running now. */
-    List<String> triageRunning() {
-        return elves.runningKeys().stream().filter(TRIAGE_MODES::containsKey).toList();
-    }
-
-    /** Which modes run, and for each mode whose last run failed, the end of its log. */
-    void sendTriageState() {
-        ObjectNode msg = JSON.createObjectNode().put("type", "triage.state");
-        triageRunning().forEach(msg.putArray("running")::add);
-        if (!msg.has("running")) msg.putArray("running");
-        ObjectNode failed = msg.putObject("failed");
-        elves.failed().forEach((key, tail) -> {
-            if (TRIAGE_MODES.containsKey(key)) failed.put(key, tail);
-        });
-        send(msg);
     }
 
     /** Active mvnpm-dependabot units: the elf's service and one-off PR checks. */
