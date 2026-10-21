@@ -239,6 +239,7 @@ class Elves {
             Manifest m = parse(Files.readString(tmp.resolve("elf.yaml")), tmp);
             Path target = dir.resolve(m.name());
             if (Files.exists(target)) throw new IllegalStateException(m.name() + " is already installed");
+            keepsSecrets(m);
             // A name stays with the repo it first came from: another repo never inherits its settings and secrets.
             Path from = state.resolve(m.name() + ".repo");
             if (Files.exists(from) && !Files.readString(from).strip().equalsIgnoreCase(repo)) {
@@ -269,6 +270,7 @@ class Elves {
         try {
             Manifest m = parse(Files.readString(i.dir().resolve("elf.yaml")), i.dir());
             if (!m.name().equals(name)) throw new IOException("the new elf.yaml renames it to " + m.name());
+            keepsSecrets(m);
             writeDefaults(m);
             rememberSecrets(m);
         } catch (Exception e) {
@@ -322,6 +324,7 @@ class Elves {
      * to. Kept outside the elf's folder, so removing the elf doesn't forget it.
      */
     void rememberSecrets(Manifest m) throws IOException {
+        keepsSecrets(m);
         Map<String, java.util.TreeSet<String>> known = secrets(m.name());
         for (ElfRunner.Setting s : m.settings()) {
             if (s.kind() == ElfRunner.Kind.SECRET || SECRET_KEY.matcher(s.key()).matches()) {
@@ -330,6 +333,23 @@ class Elves {
         }
         Files.createDirectories(state);
         Files.writeString(state.resolve(m.name() + ".secrets"), ElfRunner.JSON.writeValueAsString(known));
+    }
+
+    /**
+     * An elf.yaml has to keep listing every remembered secret and what it goes with: a version that dropped one would
+     * leave the secret in the config file, in the elf's hands, with nothing asking for it again when its account changes.
+     */
+    void keepsSecrets(Manifest m) throws IOException {
+        Set<String> keys = new java.util.HashSet<>();
+        m.settings().forEach(x -> keys.add(x.key()));
+        for (var e : secrets(m.name()).entrySet()) {
+            if (!keys.contains(e.getKey())) throw new IOException("its elf.yaml no longer lists the secret " + e.getKey());
+            List<String> missing = e.getValue().stream().filter(w -> !keys.contains(w)).toList();
+            if (!missing.isEmpty()) {
+                throw new IOException("its elf.yaml no longer lists " + String.join(", ", missing)
+                        + ", which the secret " + e.getKey() + " goes with");
+            }
+        }
     }
 
     Map<String, java.util.TreeSet<String>> secrets(String name) {
