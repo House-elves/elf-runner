@@ -56,7 +56,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.31.0"; // 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.32.0"; // 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -227,6 +227,7 @@ public class ElfRunner {
                 case "elf.remove" -> elfRemove(msg);
                 case "elf.changes" -> elfChanges(msg);
                 case "elf.run" -> elfRun(msg);
+                case "elf.schedule" -> elfSchedule(msg);
                 case "elf.file" -> elfFile(msg);
                 case "elf.data" -> elfData(msg);
                 case "elf.read" -> elfRead(msg);
@@ -539,10 +540,12 @@ public class ElfRunner {
      * @param min,max  for INT
      * @param dflt     what a new install starts with, or null
      * @param goesWith for a SECRET: the settings it belongs to (changing one needs the secret again)
+     * @param optional the elf runs without it; one with no default that isn't optional must be set first
      */
-    record Setting(String key, String label, String help, Kind kind, int min, int max, String dflt, List<String> goesWith) {
+    record Setting(String key, String label, String help, Kind kind, int min, int max, String dflt, List<String> goesWith,
+            boolean optional) {
         Setting(String key, String label, String help, Kind kind, int min, int max) {
-            this(key, label, help, kind, min, max, null, List.of());
+            this(key, label, help, kind, min, max, null, List.of(), true);
         }
     }
 
@@ -567,7 +570,7 @@ public class ElfRunner {
     static final Pattern LOGIN = Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})");
     static final Pattern WORD = Pattern.compile("[A-Za-z0-9 ._*/+#&()-]{1,100}");
     static final Pattern MODEL = Pattern.compile("[A-Za-z0-9._\\[\\]-]{0,80}");
-    static final Pattern CALENDAR = Pattern.compile("[A-Za-z0-9 *:,./~-]{1,100}");
+    static final Pattern CALENDAR = Pattern.compile("[A-Za-z0-9 *:,;./~-]{1,300}");
 
     /** The desk's settings: an elf's settings and their values; secrets only say whether they're set. */
     void elfConfig(JsonNode msg) {
@@ -622,6 +625,7 @@ public class ElfRunner {
                 writeConfig(config.file(), changes);
                 log("Changed " + elf + " settings: " + String.join(", ", changes.keySet()));
                 result.put("status", 200).put("body", configView(elf).toString());
+                if (!elf.equals("elf-runner")) elves.firstRefresh(elf);
             }
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
@@ -637,7 +641,8 @@ public class ElfRunner {
         var list = out.putArray("settings");
         for (Setting s : config.settings()) {
             ObjectNode n = list.addObject().put("key", s.key()).put("label", s.label()).put("help", s.help())
-                    .put("kind", s.kind().name().toLowerCase(java.util.Locale.ROOT));
+                    .put("kind", s.kind().name().toLowerCase(java.util.Locale.ROOT))
+                    .put("needed", !s.optional() && s.dflt() == null);
             if (s.kind() == Kind.INT) n.put("min", s.min()).put("max", s.max());
             String v = values.getOrDefault(s.key(), "");
             if (s.kind() == Kind.SECRET) n.put("set", !v.isBlank());
@@ -735,7 +740,8 @@ public class ElfRunner {
     /** Installs an elf from its repo at a commit the desk showed you. */
     void elfInstall(JsonNode msg) {
         elvesAnswer(msg, () -> {
-            elves.install(msg.path("repo").asText(""), msg.path("commit").asText(""));
+            Elves.Installed i = elves.install(msg.path("repo").asText(""), msg.path("commit").asText(""));
+            elves.firstRefresh(i.manifest().name());
             return elvesView();
         });
     }
@@ -744,6 +750,7 @@ public class ElfRunner {
     void elfUpdate(JsonNode msg) {
         elvesAnswer(msg, () -> {
             elves.update(msg.path("elf").asText(""), msg.path("commit").asText(""));
+            elves.firstRefresh(msg.path("elf").asText(""));
             return elvesView();
         });
     }
@@ -769,6 +776,15 @@ public class ElfRunner {
             Elves.Command c = i.manifest().commands().get(msg.path("command").asText(""));
             if (c == null) throw new IllegalArgumentException("Not one of " + i.manifest().name() + "'s commands");
             elves.start(i.manifest().name() + ":" + c.name(), i.manifest().name(), Elves.args(c, msg.path("params")));
+            return elvesView();
+        });
+    }
+
+    /** When an elf refreshes on its own: {@code calendar} a calendar time, null for never, "default" for its elf.yaml's. */
+    void elfSchedule(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            JsonNode c = msg.path("calendar");
+            elves.schedule(msg.path("elf").asText(""), c.isTextual() ? c.asText() : null);
             return elvesView();
         });
     }

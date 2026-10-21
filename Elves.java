@@ -42,8 +42,9 @@ class Elves {
     static final Pattern KEY = Pattern.compile("[A-Z][A-Z0-9_]{0,60}");
     static final Pattern ARG = Pattern.compile("--[a-z0-9-]{1,40}(=[A-Za-z0-9._:-]{1,80})?");
     static final Pattern COMMIT = Pattern.compile("[0-9a-f]{40}");
-    /** Names an elf can't take: House Elves' own, and the folders under ~/.config that hold logins. */
-    static final Set<String> RESERVED = Set.of("house-elves", "elf-runner", "elf-desk", "gh", "git", "systemd", "jbang", "claude");
+    /** Names an elf can't take: House Elves' own, the folders under ~/.config that hold logins, and the desk's pages. */
+    static final Set<String> RESERVED = Set.of("house-elves", "elf-runner", "elf-desk", "gh", "git", "systemd", "jbang", "claude",
+            "github", "elves", "settings", "dashboard");
     static final Pattern TOOL = Pattern.compile("[a-z0-9][a-z0-9.-]{0,30}");
     /** A command's param becomes an option: --name=value. An action's goes in JSON, so it may be camelCase. */
     static final Pattern COMMAND_PARAM = Pattern.compile("[a-z][a-z0-9-]{0,40}");
@@ -79,20 +80,24 @@ class Elves {
     }
 
     /**
-     * A tab on the desk drawn by the elf's own UI: {@code page} is a module in its ui/ folder, run in a sandboxed
-     * frame. {@code card}: it also has a card on the dashboard; {@code refresh}: the command Refresh everything runs.
+     * The elf's tab on the desk, drawn by its own UI: {@code page} is a module in its ui/ folder, run in a sandboxed
+     * frame. {@code card}: it also has a card on the dashboard.
      */
-    record Tab(String name, String label, String page, boolean card, String refresh) {
+    record Tab(String page, boolean card) {
     }
 
-    /** A schedule: the command, and the setting that holds when (or the fallback if there's no such setting). */
-    record Schedule(String command, String setting, String fallback) {
+    /**
+     * How the elf brings its tab up to date: the command its Refresh, the dashboard's Refresh everything and its first
+     * run after setup start, and when it runs on its own ({@code schedule}, a calendar time, until you set another
+     * on the desk; null: only when you start it).
+     */
+    record Refresh(String command, String schedule) {
     }
 
-    /** One elf's elf.yaml, checked. */
-    record Manifest(String name, String description, String main, Path config, List<String> tools,
-            List<ElfRunner.Setting> settings, Map<String, Command> commands, Schedule schedule, String dryRun,
-            List<String> reads, List<String> writes, List<String> data, List<Tab> tabs, Map<String, Action> actions) {
+    /** One elf's elf.yaml, checked. {@code title}: its name on the desk (the tab's, the card's). */
+    record Manifest(String name, String title, String description, String main, Path config, List<String> tools,
+            List<ElfRunner.Setting> settings, Map<String, Command> commands, Refresh refresh, String dryRun,
+            List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions) {
 
         /** The folder in ~/.config/<name>/ that its UI may read. */
         Path data(String folder) {
@@ -152,7 +157,8 @@ class Elves {
             s.path("goes-with").forEach(g -> goesWith.add(g.asText()));
             settings.add(new ElfRunner.Setting(key, clip(text(s, "label"), 80), clip(s.path("help").asText(""), 300), kind,
                     s.path("min").asInt(0), s.path("max").asInt(kind == ElfRunner.Kind.INT ? 999_999 : 0),
-                    s.hasNonNull("default") ? s.path("default").asText() : null, List.copyOf(goesWith)));
+                    s.hasNonNull("default") ? s.path("default").asText() : null, List.copyOf(goesWith),
+                    s.path("optional").asBoolean(false)));
         }
         for (ElfRunner.Setting s : settings) {
             for (String g : s.goesWith()) {
@@ -200,45 +206,52 @@ class Elves {
             data.add(d.asText());
         }
 
-        List<Tab> tabs = new ArrayList<>();
-        for (JsonNode t : y.path("tabs")) {
-            String tab = text(t, "name"), page = text(t, "page");
-            if (!NAME.matcher(tab).matches()) throw new IOException("elf.yaml: tab names are lowercase: " + tab);
-            if (tabs.stream().anyMatch(x -> x.name().equals(tab))) throw new IOException("elf.yaml: two tabs are called " + tab);
-            if (!UI_FILE.matcher(page).matches() || !page.endsWith(".js")) throw new IOException("elf.yaml: a tab's page is a .js file in ui/");
+        // The tab, and how it refreshes. Before 0.32 an elf.yaml listed tabs (each with its refresh) and a schedule
+        // read from a setting: an elf installed then still reads, with its first tab and that schedule's default.
+        JsonNode t = y.hasNonNull("tab") ? y.path("tab") : y.path("tabs").path(0);
+        Tab tab = null;
+        String refreshCommand = null, refreshSchedule = null;
+        if (!t.isMissingNode() && !t.isNull()) {
+            String page = text(t, "page");
+            if (!UI_FILE.matcher(page).matches() || !page.endsWith(".js")) throw new IOException("elf.yaml: the tab's page is a .js file in ui/");
             if (folder != null && !Files.isRegularFile(folder.resolve(page))) throw new IOException("elf.yaml: there's no " + page);
-            String refresh = t.path("refresh").asText(null);
-            if (refresh != null && (!commands.containsKey(refresh) || !commands.get(refresh).params().isEmpty())) {
-                throw new IOException("elf.yaml: the tab " + tab + " refreshes with an unknown command");
-            }
-            tabs.add(new Tab(tab, clip(t.path("label").asText(tab), 40), page, t.path("card").asBoolean(false), refresh));
+            tab = new Tab(page, t.path("card").asBoolean(false));
+            refreshCommand = t.path("refresh").asText(null);
         }
-
-        Schedule schedule = null;
-        if (y.hasNonNull("schedule")) {
+        if (y.hasNonNull("refresh")) {
+            JsonNode r = y.path("refresh");
+            refreshCommand = r.isTextual() ? r.asText() : text(r, "command");
+            refreshSchedule = r.path("schedule").asText(null);
+        } else if (y.hasNonNull("schedule")) {
             JsonNode s = y.path("schedule");
-            Schedule sch = new Schedule(text(s, "command"), s.path("setting").asText(null), s.path("default").asText(null));
-            schedule = sch;
-            if (!commands.containsKey(sch.command())) throw new IOException("elf.yaml: the schedule runs an unknown command");
-            String value = sch.setting() != null ? settings.stream().filter(x -> x.key().equals(sch.setting()))
-                    .map(ElfRunner.Setting::dflt).findFirst().orElseThrow(() -> new IOException("elf.yaml: the schedule's setting isn't a setting"))
-                    : sch.fallback();
-            if (value != null && Calendar.parse(value) == null) throw new IOException("elf.yaml: the schedule isn't a calendar time");
-            if (commands.get(sch.command()).params().values().stream().anyMatch(x -> !x.optional())) {
-                throw new IOException("elf.yaml: the schedule's command needs values nobody gives it");
-            }
+            refreshCommand = text(s, "command");
+            String setting = s.path("setting").asText(null);
+            refreshSchedule = setting == null ? s.path("default").asText(null) : settings.stream()
+                    .filter(x -> x.key().equals(setting)).map(ElfRunner.Setting::dflt).findFirst().orElse(null);
         }
+        Refresh refresh = null;
+        if (refreshCommand != null) {
+            Command c = commands.get(refreshCommand);
+            if (c == null) throw new IOException("elf.yaml: it refreshes with an unknown command");
+            if (c.params().values().stream().anyMatch(x -> !x.optional())) {
+                throw new IOException("elf.yaml: its refresh command needs values nobody gives it");
+            }
+            if (refreshSchedule != null && Calendar.parse(refreshSchedule) == null) throw new IOException("elf.yaml: the refresh schedule isn't a calendar time");
+            refresh = new Refresh(refreshCommand, refreshSchedule);
+        }
+        String title = clip(y.path("title").asText(name), 30);
+        if (title.isEmpty()) title = name;
         String dryRun = y.path("dry-run").asText(null);
         if (dryRun != null && !commands.containsKey(dryRun)) throw new IOException("elf.yaml: dry-run names an unknown command");
 
         List<String> tools = new ArrayList<>();
-        for (JsonNode t : y.path("tools")) {
-            if (!TOOL.matcher(t.asText()).matches()) throw new IOException("elf.yaml: a tool is a command name");
-            tools.add(t.asText());
+        for (JsonNode x : y.path("tools")) {
+            if (!TOOL.matcher(x.asText()).matches()) throw new IOException("elf.yaml: a tool is a command name");
+            tools.add(x.asText());
         }
-        return new Manifest(name, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
-                List.copyOf(settings), commands, schedule, dryRun, lines(y.path("reads")), lines(y.path("writes")),
-                List.copyOf(data), List.copyOf(tabs), actions);
+        return new Manifest(name, title, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
+                List.copyOf(settings), commands, refresh, dryRun, lines(y.path("reads")), lines(y.path("writes")),
+                List.copyOf(data), tab, actions);
     }
 
     /** A command's or action's params. A command's are options, so each needs a pattern or a list to be one of. */
@@ -488,6 +501,7 @@ class Elves {
         ElfRunner.deleteTree(i.dir());
         try {
             Files.deleteIfExists(state.resolve(name + ".last"));
+            Files.deleteIfExists(state.resolve(name + ".when"));
         } catch (IOException ignored) {
         }
         ElfRunner.log("Removed " + name);
@@ -553,7 +567,7 @@ class Elves {
             var with = new java.util.TreeSet<>(s.goesWith());
             boolean secret = s.kind() == ElfRunner.Kind.SECRET || SECRET_KEY.matcher(s.key()).matches() || known.containsKey(s.key());
             if (known.containsKey(s.key())) with.addAll(known.get(s.key()));
-            out.add(secret ? new ElfRunner.Setting(s.key(), s.label(), s.help(), ElfRunner.Kind.SECRET, 0, 0, s.dflt(), List.copyOf(with)) : s);
+            out.add(secret ? new ElfRunner.Setting(s.key(), s.label(), s.help(), ElfRunner.Kind.SECRET, 0, 0, s.dflt(), List.copyOf(with), s.optional()) : s);
         }
         return out;
     }
@@ -693,20 +707,50 @@ class Elves {
         }
     }
 
-    // ---- schedules ----
+    // ---- refreshing, and schedules ----
 
-    /** The schedule's calendar time for an installed elf: its setting's value, or the default. */
+    /**
+     * When an installed elf refreshes on its own: the calendar time you set on the desk (in elf-state/<name>.when,
+     * "off" for never), or its elf.yaml's until you do. Null: only when you start it.
+     */
     String calendar(Installed i) {
-        Schedule s = i.manifest().schedule();
-        if (s == null) return null;
-        if (s.setting() == null) return s.fallback();
+        Refresh r = i.manifest().refresh();
+        if (r == null) return null;
+        String set = chosen(i.manifest().name());
+        if (set == null) return r.schedule();
+        return set.equals("off") ? null : set;
+    }
+
+    /** What you set on the desk: a calendar time, "off", or null (nothing yet). */
+    String chosen(String name) {
         try {
-            String v = ElfRunner.readConfig(i.manifest().config()).get(s.setting());
-            if (v != null && !v.isBlank()) return v;
-        } catch (IOException ignored) {
+            String v = Files.readString(state.resolve(name + ".when")).strip();
+            return v.equals("off") || Calendar.parse(v) != null ? v : null;
+        } catch (IOException e) {
+            return null;
         }
-        return i.manifest().settings().stream().filter(x -> x.key().equals(s.setting())).map(ElfRunner.Setting::dflt)
-                .findFirst().orElse(null);
+    }
+
+    /**
+     * Sets when an elf refreshes on its own: a calendar time, null for never, or "default" for its elf.yaml's. It
+     * starts counting from now, so a time already past today waits for its next turn.
+     */
+    synchronized void schedule(String name, String calendar) throws IOException {
+        Installed i = get(name);
+        if (i.manifest().refresh() == null) throw new IllegalArgumentException(name + " doesn't refresh");
+        Files.createDirectories(state);
+        Path when = state.resolve(name + ".when");
+        if ("default".equals(calendar)) {
+            Files.deleteIfExists(when);
+        } else {
+            String v = calendar == null || calendar.isBlank() ? "off" : calendar.strip();
+            if (!v.equals("off") && (!ElfRunner.CALENDAR.matcher(v).matches() || Calendar.parse(v) == null)) {
+                throw new IllegalArgumentException("Not a time it can run at");
+            }
+            Files.writeString(when, v);
+        }
+        Files.writeString(state.resolve(name + ".last"), String.valueOf(Instant.now().getEpochSecond()));
+        ElfRunner.log(name + " refreshes " + (calendar(i) == null ? "only when you start it" : calendar(i)));
     }
 
     Instant lastScheduled(String name) {
@@ -717,15 +761,68 @@ class Elves {
         }
     }
 
+    /** The settings it can't run without that have no value yet: no default, not optional, empty in its config. */
+    List<String> missing(Installed i) {
+        Map<String, String> values;
+        try {
+            values = Files.isRegularFile(i.manifest().config()) ? ElfRunner.readConfig(i.manifest().config()) : Map.of();
+        } catch (IOException e) {
+            values = Map.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (ElfRunner.Setting s : settings(i)) {
+            if (!s.optional() && s.dflt() == null && values.getOrDefault(s.key(), "").isBlank()) out.add(s.key());
+        }
+        return out;
+    }
+
+    /** Something in one of the folders its tab reads: it has run before (here, or before it was an elf). */
+    boolean hasData(Installed i) {
+        for (String folder : i.manifest().data()) {
+            Path d = i.manifest().data(folder);
+            if (!Files.isDirectory(d, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
+            try (var list = Files.list(d)) {
+                if (list.findAny().isPresent()) return true;
+            } catch (IOException e) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    String refreshKey(Installed i) {
+        return i.manifest().name() + ":" + i.manifest().refresh().command();
+    }
+
     /**
-     * Once a minute: an elf whose scheduled time has passed since its last scheduled run runs now. So a run missed
-     * while the laptop slept (or the runner was down) happens when it's back, once.
+     * Once it's set up, an elf's first refresh starts by itself, so its tab has something to show: when it was
+     * installed with its settings already there, or when you save the last one it needs. Only the first time: not
+     * once its refresh ran (or is running), nor for an elf that already has something saved for its tab.
+     */
+    void firstRefresh(String name) {
+        try {
+            Installed i = get(name);
+            if (i.manifest().refresh() == null || !missing(i).isEmpty()) return;
+            String key = refreshKey(i);
+            if (running(key) || Files.exists(logs.resolve(key + ".log")) || hasData(i)) return;
+            ElfRunner.log("First refresh of " + name);
+            // Counts as its scheduled run: a time that passed while it wasn't set up doesn't run it again after.
+            Files.createDirectories(state);
+            Files.writeString(state.resolve(name + ".last"), String.valueOf(Instant.now().getEpochSecond()));
+            start(key, name, args(i.manifest().commands().get(i.manifest().refresh().command()), null));
+        } catch (Exception e) {
+            ElfRunner.log("Couldn't start " + name + "'s first refresh: " + ElfRunner.rootMessage(e));
+        }
+    }
+
+    /**
+     * Once a minute: an elf whose refresh time has passed since its last scheduled run refreshes now. So a run missed
+     * while the laptop slept (or the runner was down) happens when it's back, once. One that isn't set up yet waits.
      */
     void tick(ZonedDateTime now) {
         for (Installed i : installed().values()) {
-            Schedule s = i.manifest().schedule();
             Calendar cal = Calendar.parse(calendar(i));
-            if (s == null || cal == null) continue;
+            if (cal == null) continue;
             String name = i.manifest().name();
             try {
                 Files.createDirectories(state);
@@ -735,13 +832,18 @@ class Elves {
                     continue;
                 }
                 ZonedDateTime due = cal.previous(now);
-                String key = name + ":" + s.command();
+                String key = refreshKey(i);
                 if (due == null || !due.toInstant().isAfter(last) || running(key)) continue;
+                if (!missing(i).isEmpty()) {
+                    // Not set up: this turn is skipped, not saved up for when it is.
+                    Files.writeString(state.resolve(name + ".last"), String.valueOf(now.toEpochSecond()));
+                    continue;
+                }
                 Files.writeString(state.resolve(name + ".last"), String.valueOf(now.toEpochSecond()));
-                ElfRunner.log("Scheduled run of " + name + " (" + calendar(i) + ")");
-                start(key, name, i.manifest().commands().get(s.command()).args());
+                ElfRunner.log("Scheduled refresh of " + name + " (" + calendar(i) + ")");
+                start(key, name, args(i.manifest().commands().get(i.manifest().refresh().command()), null));
             } catch (Exception e) {
-                ElfRunner.log("Couldn't run " + name + " on schedule: " + ElfRunner.rootMessage(e));
+                ElfRunner.log("Couldn't refresh " + name + " on schedule: " + ElfRunner.rootMessage(e));
             }
         }
     }
@@ -862,9 +964,14 @@ class Elves {
 
     ObjectNode view(Installed i) {
         Manifest m = i.manifest();
-        ObjectNode n = ElfRunner.JSON.createObjectNode().put("name", m.name()).put("description", m.description())
-                .put("repo", i.repo()).put("commit", i.commit())
+        ObjectNode n = ElfRunner.JSON.createObjectNode().put("name", m.name()).put("title", m.title())
+                .put("description", m.description()).put("repo", i.repo()).put("commit", i.commit())
                 .put("installed", Files.isRegularFile(m.config()));
+        try {
+            n.put("installedAt", Files.getLastModifiedTime(state.resolve(m.name() + ".repo")).toInstant().toString());
+        } catch (IOException ignored) {
+        }
+        n.putArray("missing").addAll(missing(i).stream().map(ElfRunner.JSON.getNodeFactory()::textNode).toList());
         var tools = n.putArray("tools");
         for (String t : m.tools()) tools.addObject().put("name", t).put("found", ElfRunner.which(t) != null);
         var commands = n.putArray("commands");
@@ -880,23 +987,20 @@ class Elves {
         var actions = n.putArray("actions");
         m.actions().values().forEach(a -> actions.addObject().put("name", a.name()).put("label", a.label()).put("ask", a.ask())
                 .put("confirm", a.confirm()));
-        var tabs = n.putArray("tabs");
-        m.tabs().forEach(t -> {
-            ObjectNode x = tabs.addObject().put("name", t.name()).put("label", t.label()).put("page", t.page()).put("card", t.card());
-            if (t.refresh() != null) x.put("refresh", t.refresh());
-        });
+        if (m.tab() != null) n.putObject("tab").put("page", m.tab().page()).put("card", m.tab().card());
         m.data().forEach(n.putArray("data")::add);
         if (m.dryRun() != null) n.put("dryRun", m.dryRun());
         m.reads().forEach(n.putArray("reads")::add);
         m.writes().forEach(n.putArray("writes")::add);
-        if (m.schedule() != null) {
+        if (m.refresh() != null) {
             String when = calendar(i);
-            ObjectNode s = n.putObject("schedule").put("command", m.schedule().command()).put("calendar", when);
+            ObjectNode r = n.putObject("refresh").put("command", m.refresh().command()).put("calendar", when)
+                    .put("default", m.refresh().schedule()).put("chosen", chosen(m.name()) != null);
             Calendar cal = Calendar.parse(when);
             ZonedDateTime next = cal == null ? null : cal.next(ZonedDateTime.now());
-            if (next != null) s.put("next", next.toInstant().toString());
+            if (next != null) r.put("next", next.toInstant().toString());
             Instant last = lastScheduled(m.name());
-            if (last != null) s.put("last", last.toString());
+            if (last != null) r.put("last", last.toString());
         }
         return n;
     }
@@ -904,19 +1008,35 @@ class Elves {
     // ---- calendar times ----
 
     /**
-     * The part of systemd's calendar format schedules use: optional weekdays, any date, a time of day, in local
-     * time. {@code Mon *-*-* 08:00:00}, {@code Mon..Fri *-*-* 07:30}, {@code *-*-* 06:00:00}. It works the same on
-     * Linux and macOS, so nothing asks systemd.
+     * The part of systemd's calendar format refreshes use, in local time: optional weekdays, any date, then the hours
+     * (one, a list, a range or *) and the minute. Several of them go with ";". {@code Mon *-*-* 08:00:00},
+     * {@code Mon..Fri *-*-* 07:30}, {@code Mon..Fri *-*-* 08..18:00} (on the hour, 8 to 6),
+     * {@code *-*-* 07:00; Mon..Fri *-*-* 13:30}. It works the same on Linux and macOS, so nothing asks systemd.
      */
-    record Calendar(Set<DayOfWeek> days, LocalTime time) {
+    record Calendar(List<Rule> rules) {
+
+        /** One part: these days, at these hours, at this minute and second. */
+        record Rule(Set<DayOfWeek> days, Set<Integer> hours, int minute, int second) {
+        }
 
         static final Pattern FORMAT = Pattern.compile(
-                "(?:([A-Za-z]{3}(?:\\.\\.[A-Za-z]{3})?(?:,[A-Za-z]{3}(?:\\.\\.[A-Za-z]{3})?)*) )?\\*-\\*-\\* (\\d{1,2}):(\\d{2})(?::(\\d{2}))?");
+                "(?:([A-Za-z]{3}(?:\\.\\.[A-Za-z]{3})?(?:,[A-Za-z]{3}(?:\\.\\.[A-Za-z]{3})?)*) )?\\*-\\*-\\* "
+                        + "(\\*|\\d{1,2}(?:\\.\\.\\d{1,2})?(?:,\\d{1,2}(?:\\.\\.\\d{1,2})?)*):(\\d{2})(?::(\\d{2}))?");
         static final List<String> NAMES = List.of("mon", "tue", "wed", "thu", "fri", "sat", "sun");
 
         static Calendar parse(String v) {
-            if (v == null) return null;
-            Matcher m = FORMAT.matcher(v.strip());
+            if (v == null || v.isBlank()) return null;
+            List<Rule> rules = new ArrayList<>();
+            for (String part : v.split(";")) {
+                Rule r = rule(part.strip());
+                if (r == null) return null;
+                rules.add(r);
+            }
+            return rules.size() > 12 ? null : new Calendar(List.copyOf(rules));
+        }
+
+        static Rule rule(String v) {
+            Matcher m = FORMAT.matcher(v);
             if (!m.matches()) return null;
             Set<DayOfWeek> days = EnumSet.noneOf(DayOfWeek.class);
             if (m.group(1) == null) {
@@ -930,30 +1050,63 @@ class Elves {
                     for (int d = from; d <= to; d++) days.add(DayOfWeek.of(d + 1));
                 }
             }
-            int h = Integer.parseInt(m.group(2)), min = Integer.parseInt(m.group(3));
+            Set<Integer> hours = new java.util.TreeSet<>();
+            if (m.group(2).equals("*")) {
+                for (int h = 0; h < 24; h++) hours.add(h);
+            } else {
+                for (String part : m.group(2).split(",")) {
+                    String[] range = part.split("\\.\\.");
+                    int from = Integer.parseInt(range[0]), to = Integer.parseInt(range[range.length - 1]);
+                    if (from > 23 || to > 23 || to < from) return null;
+                    for (int h = from; h <= to; h++) hours.add(h);
+                }
+            }
+            int min = Integer.parseInt(m.group(3));
             int s = m.group(4) == null ? 0 : Integer.parseInt(m.group(4));
-            if (h > 23 || min > 59 || s > 59) return null;
-            return new Calendar(days, LocalTime.of(h, min, s));
+            if (min > 59 || s > 59) return null;
+            return new Rule(days, Set.copyOf(hours), min, s);
         }
 
         /** The latest time at or before {@code now}. */
         ZonedDateTime previous(ZonedDateTime now) {
-            for (int back = 0; back <= 7; back++) {
-                LocalDate d = now.toLocalDate().minusDays(back);
-                ZonedDateTime t = d.atTime(time).atZone(now.getZone());
-                if (days.contains(d.getDayOfWeek()) && !t.isAfter(now)) return t;
+            ZonedDateTime best = null;
+            for (Rule r : rules) {
+                for (int back = 0; back <= 7; back++) {
+                    LocalDate d = now.toLocalDate().minusDays(back);
+                    if (!r.days().contains(d.getDayOfWeek())) continue;
+                    ZonedDateTime found = null;
+                    for (int h : r.hours()) {
+                        ZonedDateTime t = d.atTime(h, r.minute(), r.second()).atZone(now.getZone());
+                        if (!t.isAfter(now) && (found == null || t.isAfter(found))) found = t;
+                    }
+                    if (found != null) {
+                        if (best == null || found.isAfter(best)) best = found;
+                        break;
+                    }
+                }
             }
-            return null;
+            return best;
         }
 
         /** The first time after {@code now}. */
         ZonedDateTime next(ZonedDateTime now) {
-            for (int ahead = 0; ahead <= 7; ahead++) {
-                LocalDate d = now.toLocalDate().plusDays(ahead);
-                ZonedDateTime t = d.atTime(time).atZone(now.getZone());
-                if (days.contains(d.getDayOfWeek()) && t.isAfter(now)) return t;
+            ZonedDateTime best = null;
+            for (Rule r : rules) {
+                for (int ahead = 0; ahead <= 7; ahead++) {
+                    LocalDate d = now.toLocalDate().plusDays(ahead);
+                    if (!r.days().contains(d.getDayOfWeek())) continue;
+                    ZonedDateTime found = null;
+                    for (int h : r.hours()) {
+                        ZonedDateTime t = d.atTime(h, r.minute(), r.second()).atZone(now.getZone());
+                        if (t.isAfter(now) && (found == null || t.isBefore(found))) found = t;
+                    }
+                    if (found != null) {
+                        if (best == null || found.isBefore(best)) best = found;
+                        break;
+                    }
+                }
             }
-            return null;
+            return best;
         }
     }
 }
