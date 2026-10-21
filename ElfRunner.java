@@ -1,6 +1,8 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 25+
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.2
+//DEPS com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.2
+//SOURCES Elves.java
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -54,7 +56,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.29.4"; // 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.30.0"; // 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -65,9 +67,16 @@ public class ElfRunner {
     volatile WebSocket socket;
     final Object sendLock = new Object();
 
+    final Elves elves;
+
     ElfRunner(Config cfg) {
         this.cfg = cfg;
         this.slots = new Semaphore(cfg.maxJobs);
+        this.elves = new Elves(Config.DATA, cfg.githubUser);
+        elves.onChange = () -> {
+            sendTriageState();
+            sendElvesState();
+        };
     }
 
     public static void main(String[] args) throws Exception {
@@ -86,6 +95,7 @@ public class ElfRunner {
         ElfRunner runner = new ElfRunner(cfg);
         runner.migrateToItemClones();
         runner.checkLogin();
+        runner.elves.schedule();
         runner.run();
     }
 
@@ -108,6 +118,7 @@ public class ElfRunner {
                 log("Connected to " + cfg.deskUrl);
                 sendMvnpmState();
                 sendTriageState();
+                sendElvesState();
                 backoff = 1;
                 closed.await();
                 log("Disconnected from the desk");
@@ -218,6 +229,12 @@ public class ElfRunner {
                 case "status.send" -> statusSend(msg);
                 case "elf.config" -> elfConfig(msg);
                 case "elf.configSet" -> elfConfigSet(msg);
+                case "elves.list" -> elvesList(msg);
+                case "elf.install" -> elfInstall(msg);
+                case "elf.update" -> elfUpdate(msg);
+                case "elf.remove" -> elfRemove(msg);
+                case "elf.changes" -> elfChanges(msg);
+                case "elf.run" -> elfRun(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -484,16 +501,19 @@ public class ElfRunner {
             String repo = msg.path("repo").asText("");
             int pr = msg.path("pr").asInt(0);
             List<String> cmd;
-            if (repo.isEmpty() && pr == 0) {
+            if (MAC) throw new IllegalStateException("mvnpm checks run on Linux only for now");
+            boolean ownUnit = Files.isRegularFile(HOME.resolve(".config/systemd/user/" + MVNPM_SERVICE));
+            if (repo.isEmpty() && pr == 0 && ownUnit) {
                 cmd = List.of("systemctl", "--user", "start", "--no-block", MVNPM_SERVICE);
             } else {
-                if (!REPO_NAME.matcher(repo).matches() || pr <= 0) throw new IllegalArgumentException("Bad mvnpm check request");
-                Path elf = which("mvnpm-dependabot");
-                if (elf == null) throw new IllegalStateException("mvnpm-dependabot isn't on the runner's PATH");
-                cmd = List.of("systemd-run", "--user", "--unit=" + MVNPM_PR_UNIT + repo.replace('/', '-') + "-" + pr,
-                        "--description=mvnpm-dependabot check of " + repo + "#" + pr, "--property=Nice=10",
-                        "--property=TimeoutStartSec=4h", "--setenv=PATH=" + System.getenv("PATH"),
-                        "--collect", elf.toString(), "--repo", repo, "--pr", String.valueOf(pr));
+                boolean round = repo.isEmpty() && pr == 0;
+                if (!round && (!REPO_NAME.matcher(repo).matches() || pr <= 0)) throw new IllegalArgumentException("Bad mvnpm check request");
+                cmd = new ArrayList<>(List.of("systemd-run", "--user",
+                        "--unit=" + (round ? MVNPM_SERVICE : MVNPM_PR_UNIT + repo.replace('/', '-') + "-" + pr),
+                        "--description=mvnpm-dependabot " + (round ? "round" : "check of " + repo + "#" + pr), "--property=Nice=10",
+                        "--property=TimeoutStartSec=4h", "--setenv=PATH=" + System.getenv("PATH"), "--collect"));
+                cmd.addAll(elves.command("mvnpm-dependabot"));
+                cmd.addAll(round ? List.of("--once") : List.of("--repo", repo, "--pr", String.valueOf(pr)));
             }
             if (!mvnpmRunning().isEmpty() && (repo.isEmpty() || mvnpmRunning().contains(MVNPM_SERVICE))) {
                 throw new IllegalStateException("mvnpm-dependabot is already running; wait for it to finish");
@@ -520,12 +540,13 @@ public class ElfRunner {
     /**
      * One setting the desk may read and change. Nothing else in a config file is ever shown or written.
      *
-     * @param min,max for INT
-     * @param timer   for CALENDAR: the systemd user timer whose OnCalendar it sets
+     * @param min,max  for INT
+     * @param dflt     what a new install starts with, or null
+     * @param goesWith for a SECRET: the settings it belongs to (changing one needs the secret again)
      */
-    record Setting(String key, String label, String help, Kind kind, int min, int max, String timer) {
-        Setting(String key, String label, String help, Kind kind) {
-            this(key, label, help, kind, 0, 0, null);
+    record Setting(String key, String label, String help, Kind kind, int min, int max, String dflt, List<String> goesWith) {
+        Setting(String key, String label, String help, Kind kind, int min, int max) {
+            this(key, label, help, kind, min, max, null, List.of());
         }
     }
 
@@ -534,45 +555,18 @@ public class ElfRunner {
 
     static final Path HOME = Path.of(System.getProperty("user.home"));
 
-    /** The elves the desk configures, and what of each. */
-    static final Map<String, ElfConfig> ELF_CONFIGS = Map.of(
-            "daily-triage", new ElfConfig(HOME.resolve(".config/daily-triage/config"), List.of(
-                    new Setting("GMAIL_ADDRESS", "Gmail account", "The inbox the email triage reads.", Kind.EMAIL),
-                    new Setting("GMAIL_APP_PASSWORD", "Gmail app password", "From myaccount.google.com/apppasswords.", Kind.SECRET),
-                    new Setting("MAX_EMAILS", "Emails per triage", "The most unread emails one triage looks at.", Kind.INT, 1, 500, null),
-                    new Setting("TRIAGE_LABEL", "Label for noise", "The Gmail label for what the triage marks read.", Kind.WORDS),
-                    new Setting("ZULIP_SERVER_1", "Zulip server", "For example quarkusio.zulipchat.com.", Kind.HOST),
-                    new Setting("ZULIP_EMAIL_1", "Zulip account", "The email you sign in to Zulip with.", Kind.EMAIL),
-                    new Setting("ZULIP_API_KEY_1", "Zulip API key", "From Zulip: Personal settings, Account and privacy, API key.", Kind.SECRET),
-                    new Setting("ZULIP_WATCH_1", "Streams to read", "Comma-separated stream names, or * for all your streams.", Kind.WORDS))),
-            "weekly-status", new ElfConfig(HOME.resolve(".config/weekly-status/config"), List.of(
-                    new Setting("DISPLAY_NAME", "Your name", "In the subject line.", Kind.TEXT),
-                    new Setting("GITHUB_USER", "GitHub account", "Whose work goes in the status.", Kind.LOGIN),
-                    new Setting("EXCLUDE_ORGS", "Leave out these orgs", "Comma-separated GitHub orgs whose work isn't part of the status.", Kind.WORDS),
-                    new Setting("LOOKBACK_DAYS", "Days covered", "How far back each status looks.", Kind.INT, 1, 31, null),
-                    new Setting("SEND_TO", "Send to me", "Where Send to me goes (comma-separated).", Kind.EMAILS),
-                    new Setting("TEAM_TO", "Send to the team", "Where Send to team goes (comma-separated).", Kind.EMAILS),
-                    new Setting("GMAIL_ADDRESS", "Send from", "The Gmail account it sends with.", Kind.EMAIL),
-                    new Setting("GMAIL_APP_PASSWORD", "Gmail app password", "From myaccount.google.com/apppasswords.", Kind.SECRET),
-                    new Setting("SCHEDULE", "Draft it on", "When the draft is written, in systemd's calendar format: Mon *-*-* 08:00:00.",
-                            Kind.CALENDAR, 0, 0, "weekly-status.timer"))),
-            "quarterly-review", new ElfConfig(HOME.resolve(".config/quarterly-review/config"), List.of(
-                    new Setting("DISPLAY_NAME", "Your name", "Who the review is about.", Kind.TEXT),
-                    new Setting("GITHUB_USER", "GitHub account", "Whose work goes in the review.", Kind.LOGIN),
-                    new Setting("EXCLUDE_ORGS", "Leave out these orgs", "Comma-separated GitHub orgs whose work isn't part of the review.", Kind.WORDS))),
-            "mvnpm-dependabot", new ElfConfig(HOME.resolve(".config/mvnpm-dependabot/config"), List.of(
-                    new Setting("REPOS", "Repos it checks", "Comma-separated owner/repo whose mvnpm bumps it checks.", Kind.REPOS),
-                    new Setting("APPROVE_MAJOR", "Check major bumps too", "Off: major version bumps are left for you.", Kind.BOOL),
-                    new Setting("AGENT_MODEL", "Claude model", "Empty for the default.", Kind.TEXT))),
-            "elf-runner", new ElfConfig(Config.FILE, List.of(
-                    new Setting("MAX_JOBS", "Agents at a time", "More use more memory. Applies when the runner restarts.", Kind.INT, 1, 4, null),
-                    new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240, null))));
+    /** The runner's own settings; each installed elf's come from its elf.yaml. */
+    static final ElfConfig RUNNER_CONFIG = new ElfConfig(Config.FILE, List.of(
+            new Setting("MAX_JOBS", "Agents at a time", "More use more memory. Applies when the runner restarts.", Kind.INT, 1, 4),
+            new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240)));
     // Not SANDBOX_PODMAN: what the sandbox can reach is changed in the runner's config file only, never from the desk.
 
-    /** Each secret, and the settings it's tied to: changing one of those needs the secret again. */
-    static final Map<String, List<String>> SECRET_FOR = Map.of(
-            "GMAIL_APP_PASSWORD", List.of("GMAIL_ADDRESS"),
-            "ZULIP_API_KEY_1", List.of("ZULIP_SERVER_1", "ZULIP_EMAIL_1"));
+    /** The settings the desk may show and change for an elf (or the runner itself). */
+    ElfConfig elfSettings(String elf) {
+        if (elf.equals("elf-runner")) return RUNNER_CONFIG;
+        Elves.Manifest m = elves.get(elf).manifest();
+        return new ElfConfig(m.config(), m.settings());
+    }
 
     static final Pattern LOGIN = Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})");
     static final Pattern WORD = Pattern.compile("[A-Za-z0-9 ._*/+#&()-]{1,100}");
@@ -592,14 +586,13 @@ public class ElfRunner {
 
     /**
      * Changes settings: every value is checked first (nothing is written if one is wrong), then the config file is
-     * rewritten in place (other lines kept) and a schedule also goes to its timer. An empty secret keeps the old one.
+     * rewritten in place (other lines kept). A schedule is read from there each minute. An empty secret keeps the old one.
      */
     void elfConfigSet(JsonNode msg) {
         ObjectNode result = JSON.createObjectNode().put("type", "elf.config.result").put("id", msg.path("id").asText());
         try {
             String elf = msg.path("elf").asText();
-            ElfConfig config = ELF_CONFIGS.get(elf);
-            if (config == null) throw new IllegalArgumentException("Not an elf the desk configures");
+            ElfConfig config = elfSettings(elf);
             if (!Files.isRegularFile(config.file())) throw new IllegalStateException(elf + " isn't set up on this machine");
             Map<String, String> changes = new java.util.LinkedHashMap<>();
             Map<String, String> wrong = new java.util.LinkedHashMap<>();
@@ -619,22 +612,18 @@ public class ElfRunner {
             // A secret belongs to the account and server it was given for: moving either needs the secret again,
             // so the desk can never send a stored password or API key somewhere new.
             Map<String, String> current = readConfig(config.file());
-            SECRET_FOR.forEach((secret, owners) -> {
-                if (config.settings().stream().noneMatch(x -> x.key().equals(secret))) return;
-                for (String owner : owners) {
+            for (Setting secret : config.settings()) {
+                for (String owner : secret.goesWith()) {
                     if (changes.containsKey(owner) && !changes.get(owner).equals(current.getOrDefault(owner, ""))
-                            && !changes.containsKey(secret)) {
-                        wrong.put(secret, "Enter it again: it goes with the account and server you changed");
+                            && !changes.containsKey(secret.key())) {
+                        wrong.put(secret.key(), "Enter it again: it goes with the account and server you changed");
                     }
                 }
-            });
+            }
             if (!wrong.isEmpty()) {
                 result.put("status", 422).put("body", JSON.createObjectNode().set("wrong", JSON.valueToTree(wrong)).toString());
             } else {
                 writeConfig(config.file(), changes);
-                for (Setting s : config.settings()) {
-                    if (s.timer() != null && changes.containsKey(s.key())) setTimer(s.timer(), changes.get(s.key()));
-                }
                 log("Changed " + elf + " settings: " + String.join(", ", changes.keySet()));
                 result.put("status", 200).put("body", configView(elf).toString());
             }
@@ -644,9 +633,8 @@ public class ElfRunner {
         send(result);
     }
 
-    static ObjectNode configView(String elf) throws IOException {
-        ElfConfig config = ELF_CONFIGS.get(elf);
-        if (config == null) throw new IllegalArgumentException("Not an elf the desk configures");
+    ObjectNode configView(String elf) throws IOException {
+        ElfConfig config = elfSettings(elf);
         ObjectNode out = JSON.createObjectNode().put("elf", elf).put("installed", Files.isRegularFile(config.file()))
                 .put("file", config.file().startsWith(HOME) ? "~/" + HOME.relativize(config.file()) : config.file().toString());
         Map<String, String> values = Files.isRegularFile(config.file()) ? readConfig(config.file()) : Map.of();
@@ -678,7 +666,7 @@ public class ElfRunner {
             case HOST -> HOST.matcher(v).matches();
             case INT -> v.matches("\\d{1,6}") && Integer.parseInt(v) >= s.min() && Integer.parseInt(v) <= s.max();
             case BOOL -> v.equals("true") || v.equals("false");
-            case CALENDAR -> CALENDAR.matcher(v).matches() && validCalendar(v);
+            case CALENDAR -> CALENDAR.matcher(v).matches() && Elves.Calendar.parse(v) != null;
             case SECRET -> v.length() >= 8 && v.length() <= 200 && v.chars().allMatch(c -> c >= 0x20 && c < 0x7f);
         };
         if (ok) return null;
@@ -687,22 +675,12 @@ public class ElfRunner {
             case EMAILS -> "One or more email addresses, comma-separated";
             case REPOS -> "One or more owner/repo, comma-separated";
             case INT -> "A number from " + s.min() + " to " + s.max();
-            case CALENDAR -> "Not a systemd calendar time (try Mon *-*-* 08:00:00)";
+            case CALENDAR -> "Weekdays, *-*-* and a time, like Mon *-*-* 08:00:00 or Mon..Fri *-*-* 07:30";
             case LOGIN -> "Not a GitHub login";
             case HOST -> "Not a host name";
             case SECRET -> "8 to 200 printable characters";
             default -> "Not a valid value";
         };
-    }
-
-    static boolean validCalendar(String v) {
-        try {
-            Process p = new ProcessBuilder("systemd-analyze", "calendar", "--", v).redirectErrorStream(true).start();
-            p.getInputStream().readAllBytes();
-            return p.waitFor(10, TimeUnit.SECONDS) && p.exitValue() == 0;
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     static Map<String, String> readConfig(Path file) throws IOException {
@@ -736,17 +714,86 @@ public class ElfRunner {
         Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
     }
 
-    /** A drop-in for the timer with the new OnCalendar, then systemd picks it up. */
-    static void setTimer(String timer, String calendar) throws Exception {
-        Path dir = HOME.resolve(".config/systemd/user/" + timer + ".d");
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve("elf-desk.conf"), "# Set from Elf Desk's settings\n[Timer]\nOnCalendar=\nOnCalendar=" + calendar + "\n");
-        for (List<String> cmd : List.of(List.of("systemctl", "--user", "daemon-reload"),
-                List.of("systemctl", "--user", "restart", timer))) {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) throw new IOException(String.join(" ", cmd) + ": " + clip(out, 200));
+    // ---- the installed elves, for the desk's Elves page ----
+
+    /** What's installed, and the runs of their commands (a dry run's output among them). */
+    void elvesList(JsonNode msg) {
+        elvesAnswer(msg, () -> elvesView());
+    }
+
+    ObjectNode elvesView() {
+        ObjectNode out = JSON.createObjectNode();
+        var list = out.putArray("elves");
+        for (Elves.Installed i : elves.installed().values()) {
+            ObjectNode n = elves.view(i);
+            var runs = n.putArray("runs");
+            for (String c : i.manifest().commands().keySet()) {
+                ObjectNode last = elves.last(i.manifest().name() + ":" + c);
+                if (last.has("output") || last.path("running").asBoolean()) runs.add(last.put("command", c));
+            }
+            list.add(n);
         }
+        return out;
+    }
+
+    /** Installs an elf from its repo at a commit the desk showed you. */
+    void elfInstall(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            elves.install(msg.path("repo").asText(""), msg.path("commit").asText(""));
+            return elvesView();
+        });
+    }
+
+    /** Moves an elf to a newer commit, once you've seen what changed. */
+    void elfUpdate(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            elves.update(msg.path("elf").asText(""), msg.path("commit").asText(""));
+            return elvesView();
+        });
+    }
+
+    void elfChanges(JsonNode msg) {
+        elvesAnswer(msg, () -> elves.changes(msg.path("elf").asText(""), msg.path("commit").asText("")));
+    }
+
+    void elfRemove(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            elves.remove(msg.path("elf").asText(""));
+            return elvesView();
+        });
+    }
+
+    /** Runs one of the commands an elf's elf.yaml declares, with its fixed arguments: nothing comes from the desk. */
+    void elfRun(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            Elves.Installed i = elves.get(msg.path("elf").asText(""));
+            Elves.Command c = i.manifest().commands().get(msg.path("command").asText(""));
+            if (c == null) throw new IllegalArgumentException("Not one of " + i.manifest().name() + "'s commands");
+            elves.start(i.manifest().name() + ":" + c.name(), i.manifest().name(), c.args());
+            return elvesView();
+        });
+    }
+
+    interface Answer {
+        ObjectNode get() throws Exception;
+    }
+
+    void elvesAnswer(JsonNode msg, Answer answer) {
+        ObjectNode result = JSON.createObjectNode().put("type", "elves.result").put("id", msg.path("id").asText());
+        try {
+            result.put("status", 200).put("body", answer.get().toString());
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    /** Tells the desk the elves changed (a run started or ended), so the Elves page refreshes. */
+    void sendElvesState() {
+        ObjectNode msg = JSON.createObjectNode().put("type", "elves.state");
+        elves.runningKeys().forEach(msg.putArray("running")::add);
+        if (!msg.has("running")) msg.putArray("running");
+        send(msg);
     }
 
     // ---- daily-triage runs, for the desk ----
@@ -767,14 +814,11 @@ public class ElfRunner {
     }
     /** The quarter a quarterly review is for: 2026-Q3. */
     static final Pattern QUARTER = Pattern.compile("\\d{4}-Q[1-4]");
-    static final String TRIAGE_UNIT = "daily-triage-desk-";
-    final Object triageWatch = new Object();
-    volatile boolean triageWatching;
 
     /**
-     * Starts daily-triage as a systemd user unit, {@code daily-triage-desk-<mode>}. The elf saves the run under
-     * ~/.config/daily-triage/runs, where the desk reads it. The unit isn't collected, so a failed run stays failed
-     * (and its log readable) until the next run of that mode.
+     * Starts a built-in tab's run (email, zulip, status, quarterly) in the background. The elf saves the run in its
+     * own folder under ~/.config, where the desk reads it. A failed run stays failed (the end of its log shown on the
+     * desk) until the next run of that mode.
      */
     void triageRun(JsonNode msg) {
         ObjectNode result = JSON.createObjectNode().put("type", "triage.result").put("id", msg.path("id").asText());
@@ -782,28 +826,14 @@ public class ElfRunner {
             String mode = msg.path("mode").asText("");
             List<String> args = TRIAGE_MODES.get(mode);
             if (args == null) throw new IllegalArgumentException("Bad daily-triage mode");
-            if (triageRunning().contains(mode)) throw new IllegalStateException("It's already running; wait for it to finish");
-            Path elf = which(triageElf(mode));
-            if (elf == null) throw new IllegalStateException(triageElf(mode) + " isn't on the runner's PATH");
-            String unit = TRIAGE_UNIT + mode;
-            new ProcessBuilder("systemctl", "--user", "reset-failed", unit).start().waitFor(10, TimeUnit.SECONDS);
-            List<String> cmd = new ArrayList<>(List.of("systemd-run", "--user", "--unit=" + unit,
-                    "--description=" + triageElf(mode) + " " + mode + " for Elf Desk", "--property=Nice=10",
-                    "--property=TimeoutStartSec=3h", "--setenv=PATH=" + System.getenv("PATH"), elf.toString()));
-            cmd.addAll(args);
+            args = new ArrayList<>(args);
             if (mode.equals("quarterly") && msg.hasNonNull("quarter")) {
                 String quarter = msg.path("quarter").asText();
                 if (!QUARTER.matcher(quarter).matches()) throw new IllegalArgumentException("Bad quarter");
-                cmd.add("--quarter=" + quarter);
+                args.add("--quarter=" + quarter);
             }
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-            if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) {
-                throw new IOException("Couldn't start daily-triage: " + clip(out, 300));
-            }
-            log("Started " + triageElf(mode) + " " + mode);
+            elves.start(mode, triageElf(mode), args);
             result.put("status", 200).put("body", "{}");
-            watchTriage();
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
         }
@@ -897,14 +927,12 @@ public class ElfRunner {
     }
 
     /** daily-triage with these arguments, waited for: its last output line, or its output as the error. */
-    static String runTriage(List<String> args) throws Exception {
+    String runTriage(List<String> args) throws Exception {
         return runElf("daily-triage", args, null);
     }
 
-    static String runElf(String name, List<String> args, String stdin) throws Exception {
-        Path elf = which(name);
-        if (elf == null) throw new IllegalStateException(name + " isn't on the runner's PATH");
-        List<String> cmd = new ArrayList<>(List.of(elf.toString()));
+    String runElf(String name, List<String> args, String stdin) throws Exception {
+        List<String> cmd = new ArrayList<>(elves.command(name));
         cmd.addAll(args);
         Path log = Files.createTempFile("elf-" + name, ".log");
         try {
@@ -924,81 +952,21 @@ public class ElfRunner {
         }
     }
 
-    /** The modes running now. */
-    static List<String> triageRunning() {
-        List<String> modes = new ArrayList<>();
-        for (String unit : units("--state=activating,active", TRIAGE_UNIT + "*")) {
-            modes.add(unit.substring(TRIAGE_UNIT.length(), unit.length() - ".service".length()));
-        }
-        return modes;
-    }
-
-    /** systemd user units matching a pattern, in the given states. */
-    static List<String> units(String state, String pattern) {
-        try {
-            Process p = new ProcessBuilder("systemctl", "--user", "list-units", "--all", state, "--no-legend", "--plain",
-                    pattern).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            p.waitFor(10, TimeUnit.SECONDS);
-            List<String> units = new ArrayList<>();
-            for (String line : out.split("\n")) {
-                String unit = line.strip().split("\\s+")[0];
-                if (unit.endsWith(".service")) units.add(unit);
-            }
-            return units;
-        } catch (Exception e) {
-            return List.of();
-        }
+    /** The built-in tabs' modes running now. */
+    List<String> triageRunning() {
+        return elves.runningKeys().stream().filter(TRIAGE_MODES::containsKey).toList();
     }
 
     /** Which modes run, and for each mode whose last run failed, the end of its log. */
     void sendTriageState() {
-        List<String> running = triageRunning();
         ObjectNode msg = JSON.createObjectNode().put("type", "triage.state");
-        var arr = msg.putArray("running");
-        running.forEach(arr::add);
+        triageRunning().forEach(msg.putArray("running")::add);
+        if (!msg.has("running")) msg.putArray("running");
         ObjectNode failed = msg.putObject("failed");
-        for (String unit : units("--state=failed", TRIAGE_UNIT + "*")) {
-            String mode = unit.substring(TRIAGE_UNIT.length(), unit.length() - ".service".length());
-            failed.put(mode, journalTail(unit));
-        }
-        send(msg);
-        if (!running.isEmpty()) watchTriage();
-    }
-
-    static String journalTail(String unit) {
-        try {
-            Process p = new ProcessBuilder("journalctl", "--user", "-u", unit, "-n", "15", "--no-pager", "-o", "cat")
-                    .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-            p.waitFor(10, TimeUnit.SECONDS);
-            return clip(out, 2000);
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /** Reports the runs every 5 seconds until none run, then once more (the desk reads the saved run then). */
-    void watchTriage() {
-        synchronized (triageWatch) {
-            if (triageWatching) return;
-            triageWatching = true;
-        }
-        Thread.ofVirtual().start(() -> {
-            try {
-                List<String> last = null;
-                while (true) {
-                    Thread.sleep(Duration.ofSeconds(last == null ? 2 : 5));
-                    List<String> now = triageRunning();
-                    if (!now.equals(last)) sendTriageState();
-                    if (now.isEmpty()) break;
-                    last = now;
-                }
-            } catch (InterruptedException ignored) {
-            } finally {
-                triageWatching = false;
-            }
+        elves.failed().forEach((key, tail) -> {
+            if (TRIAGE_MODES.containsKey(key)) failed.put(key, tail);
         });
+        send(msg);
     }
 
     /** Active mvnpm-dependabot units: the elf's service and one-off PR checks. */
@@ -2375,6 +2343,8 @@ public class ElfRunner {
         static final Path NEW_FILE = Path.of(System.getenv().getOrDefault("HOUSE_ELVES_CONFIG", HOME + "/.config/house-elves"),
                 "runner.config");
         static final Path FILE = Files.isRegularFile(NEW_FILE) || !Files.isRegularFile(OLD_FILE) ? NEW_FILE : OLD_FILE;
+        /** House Elves' data directory: the installed elves are in elves/. */
+        static final Path DATA = Path.of(System.getenv().getOrDefault("HOUSE_ELVES_DATA", HOME + "/.local/share/house-elves"));
 
         String deskUrl;
         String token;
