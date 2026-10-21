@@ -54,7 +54,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.29.3"; // 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.29.4"; // 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -564,7 +564,7 @@ public class ElfRunner {
                     new Setting("REPOS", "Repos it checks", "Comma-separated owner/repo whose mvnpm bumps it checks.", Kind.REPOS),
                     new Setting("APPROVE_MAJOR", "Check major bumps too", "Off: major version bumps are left for you.", Kind.BOOL),
                     new Setting("AGENT_MODEL", "Claude model", "Empty for the default.", Kind.TEXT))),
-            "elf-runner", new ElfConfig(HOME.resolve(".config/elf-runner/config"), List.of(
+            "elf-runner", new ElfConfig(Config.FILE, List.of(
                     new Setting("MAX_JOBS", "Agents at a time", "More use more memory. Applies when the runner restarts.", Kind.INT, 1, 4, null),
                     new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240, null))));
     // Not SANDBOX_PODMAN: what the sandbox can reach is changed in the runner's config file only, never from the desk.
@@ -648,7 +648,7 @@ public class ElfRunner {
         ElfConfig config = ELF_CONFIGS.get(elf);
         if (config == null) throw new IllegalArgumentException("Not an elf the desk configures");
         ObjectNode out = JSON.createObjectNode().put("elf", elf).put("installed", Files.isRegularFile(config.file()))
-                .put("file", "~/" + HOME.relativize(config.file()));
+                .put("file", config.file().startsWith(HOME) ? "~/" + HOME.relativize(config.file()) : config.file().toString());
         Map<String, String> values = Files.isRegularFile(config.file()) ? readConfig(config.file()) : Map.of();
         var list = out.putArray("settings");
         for (Setting s : config.settings()) {
