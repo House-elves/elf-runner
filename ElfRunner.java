@@ -56,6 +56,7 @@ public class ElfRunner {
 
     static final String VERSION = "0.29.3"; // 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
+    static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
     final Config cfg;
     final Semaphore slots;
@@ -75,10 +76,12 @@ public class ElfRunner {
         if (args.length > 0 && args[0].equals("--sandbox-shell")) {
             // For checking the sandbox by hand: runs a command inside it, e.g. --sandbox-shell bash -c 'ls ~'
             List<String> cmd = args.length > 1 ? List.of(args).subList(1, args.length) : List.of("bash");
-            Process p = new ProcessBuilder(Sandbox.wrap(cfg, cmd, cfg.workDir.resolve("tmp"), null)).inheritIO().start();
+            Process p = new ProcessBuilder(Sandbox.wrap(cfg, cmd, cfg.workDir.resolve("tmp"), null))
+                    .directory(cfg.workDir.resolve("tmp").toFile()).inheritIO().start();
             System.exit(p.waitFor());
         }
-        if (cfg.sandbox) log("Agents run in a bubblewrap sandbox" + (cfg.sandboxPodman ? " with Podman" : ""));
+        if (cfg.sandbox) log("Agents run in " + (MAC ? "a macOS sandbox (sandbox-exec)" : "a bubblewrap sandbox")
+                + (cfg.sandboxPodman ? " with Podman" : ""));
         else log("WARNING: SANDBOX=none - agents can reach your GitHub credentials");
         ElfRunner runner = new ElfRunner(cfg);
         runner.migrateToItemClones();
@@ -342,16 +345,16 @@ public class ElfRunner {
 
     /** The runner's Claude has its own config dir, so "Not logged in" needs a specific instruction. */
     String loginHint(JsonNode result) {
-        return result.path("result").asText("").contains("Not logged in")
-                ? ". Log the runner in once: CLAUDE_CONFIG_DIR=" + cfg.claudeConfigDir + " claude, then /login"
-                : "";
+        return result.path("result").asText("").contains("Not logged in") ? ". " + LOGIN_HOW : "";
     }
+
+    static final String LOGIN_HOW = "Log the runner in once: run claude setup-token and put the token in the runner's "
+            + "config as CLAUDE_CODE_OAUTH_TOKEN (house-elves doctor says where)";
 
     /** Warn at startup if the sandboxed Claude can't work, rather than on the first job. */
     void checkLogin() {
-        if (!Files.exists(cfg.claudeConfigDir.resolve(".credentials.json"))) {
-            log("WARNING: the runner's Claude isn't logged in; jobs will fail until you run: CLAUDE_CONFIG_DIR="
-                    + cfg.claudeConfigDir + " claude, then /login");
+        if (cfg.claudeToken == null && !Files.exists(cfg.claudeConfigDir.resolve(".credentials.json"))) {
+            log("WARNING: the runner's Claude isn't logged in; jobs will fail. " + LOGIN_HOW);
         }
     }
 
@@ -1949,7 +1952,10 @@ public class ElfRunner {
         if (!cfg.sandbox && files != null) pb.environment().put("ELF_FILES", files.toString());
         pb.redirectError(ProcessBuilder.Redirect.appendTo(cfg.workDir.resolve("agent-stderr.log").toFile()));
         scrub(pb.environment());
-        if (!cfg.sandbox) pb.environment().put("CLAUDE_CONFIG_DIR", cfg.claudeConfigDir.toString());
+        if (!cfg.sandbox) {
+            pb.environment().put("CLAUDE_CONFIG_DIR", cfg.claudeConfigDir.toString());
+            if (cfg.claudeToken != null) pb.environment().put("CLAUDE_CODE_OAUTH_TOKEN", cfg.claudeToken);
+        }
         return pb;
     }
 
@@ -2052,24 +2058,12 @@ public class ElfRunner {
             List<String> b = new ArrayList<>();
             try {
                 Path creds = c.resolve(".credentials.json");
-                if (!Files.isRegularFile(creds, LinkOption.NOFOLLOW_LINKS)) {
+                boolean credsFile = Files.isRegularFile(creds, LinkOption.NOFOLLOW_LINKS);
+                if (!credsFile && cfg.claudeToken == null) {
                     // Not logged in yet: the whole dir, so a /login in the sandbox shell is kept.
                     return List.of("--bind", c.toString(), c.toString());
                 }
-                String name = cwd.toString().replaceAll("[^A-Za-z0-9]", "-");
-                // Claude names a project's dir after its path with every other character as '-', so two items can map
-                // to one dir (foo_bar#1 and foo-bar#1). Refuse rather than let one see the other's sessions.
-                Path parent = cwd.getParent();
-                if (parent != null && cwd.startsWith(cfg.workDir.resolve("worktrees"))) {
-                    try (var siblings = Files.list(parent)) {
-                        for (Path x : siblings.toList()) {
-                            if (!x.equals(cwd) && x.toString().replaceAll("[^A-Za-z0-9]", "-").equals(name)) {
-                                throw new IllegalStateException(cwd.getFileName() + " and " + x.getFileName()
-                                        + " would share Claude sessions; remove one of them from " + parent);
-                            }
-                        }
-                    }
-                }
+                String name = sessionsName(cfg, cwd);
                 Path own = c.resolve("projects").resolve(name);
                 Files.createDirectories(own);
                 Path state = cfg.workDir.resolve("claude-state");
@@ -2080,9 +2074,10 @@ public class ElfRunner {
                 if (Files.isRegularFile(master, LinkOption.NOFOLLOW_LINKS)) Files.copy(master, copy);
                 else Files.writeString(copy, "{}\n");
                 b.addAll(List.of("--tmpfs", c.toString(),
-                        "--bind", creds.toString(), creds.toString(),
                         "--bind", copy.toString(), master.toString(),
                         "--bind", own.toString(), own.toString()));
+                // With a token (CLAUDE_CODE_OAUTH_TOKEN) the login file stays out.
+                if (cfg.claudeToken == null) b.addAll(List.of("--bind", creds.toString(), creds.toString()));
                 for (String f : List.of("CLAUDE.md", "settings.json", "settings.local.json")) {
                     Path p = c.resolve(f);
                     if (!Files.exists(p, LinkOption.NOFOLLOW_LINKS)) Files.writeString(p, f.endsWith(".json") ? "{}\n" : "");
@@ -2098,7 +2093,28 @@ public class ElfRunner {
             return b;
         }
 
+        /**
+         * The directory name Claude keeps a project's sessions under: its path with every other character as '-'.
+         * Two items can map to one name (foo_bar#1 and foo-bar#1): refuse rather than let one see the other's sessions.
+         */
+        static String sessionsName(Config cfg, Path cwd) throws IOException {
+            String name = cwd.toString().replaceAll("[^A-Za-z0-9]", "-");
+            Path parent = cwd.getParent();
+            if (parent != null && cwd.startsWith(cfg.workDir.resolve("worktrees"))) {
+                try (var siblings = Files.list(parent)) {
+                    for (Path x : siblings.toList()) {
+                        if (!x.equals(cwd) && x.toString().replaceAll("[^A-Za-z0-9]", "-").equals(name)) {
+                            throw new IllegalStateException(cwd.getFileName() + " and " + x.getFileName()
+                                    + " would share Claude sessions; remove one of them from " + parent);
+                        }
+                    }
+                }
+            }
+            return name;
+        }
+
         static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files) {
+            if (MAC) return MacSandbox.wrap(cfg, cmd, cwd, files);
             String home = System.getProperty("user.home");
             String runtime = System.getenv().getOrDefault("XDG_RUNTIME_DIR", "/run/user/" + uid());
             Path w = cfg.workDir;
@@ -2114,7 +2130,6 @@ public class ElfRunner {
                     "--tmpfs", "/tmp", "--tmpfs", "/var/tmp",
                     "--tmpfs", home,
                     "--tmpfs", runtime,
-                    "--ro-bind", home + "/.sdkman", home + "/.sdkman",
                     "--ro-bind", Path.of(cfg.claude).getParent().toString(), Path.of(cfg.claude).getParent().toString(),
                     "--bind", w.resolve("m2").toString(), home + "/.m2",
                     // Item clones borrow objects from the cache: readable, never writable, from the sandbox.
@@ -2130,14 +2145,14 @@ public class ElfRunner {
             if (files != null) {
                 b.addAll(List.of("--bind", files.toString(), home + "/elf-files", "--setenv", "ELF_FILES", home + "/elf-files"));
             }
+            // The JDK and Maven the runner found (see Config.prepare), wherever they're installed.
+            for (Path tool : cfg.toolHomes()) b.addAll(List.of("--ro-bind", tool.toString(), tool.toString()));
             b.addAll(claudeIsolation(cfg, cwd));
-            String sdk = home + "/.sdkman/candidates";
             b.addAll(List.of("--clearenv",
                     "--setenv", "HOME", home,
                     "--setenv", "USER", System.getProperty("user.name"),
-                    "--setenv", "PATH", sdk + "/java/current/bin:" + sdk + "/maven/current/bin:"
-                            + Path.of(cfg.claude).getParent() + ":/usr/local/bin:/usr/bin",
-                    "--setenv", "JAVA_HOME", sdk + "/java/current",
+                    "--setenv", "PATH", cfg.agentPath(),
+                    "--setenv", "JAVA_HOME", cfg.javaHome.toString(),
                     "--setenv", "LANG", System.getenv().getOrDefault("LANG", "C.UTF-8"),
                     "--setenv", "TERM", "dumb",
                     "--setenv", "XDG_RUNTIME_DIR", runtime,
@@ -2152,6 +2167,7 @@ public class ElfRunner {
                     "--setenv", "GIT_SSH_COMMAND", "false",
                     "--chdir", cwd.toString()));
             // After --clearenv: these setenvs would be wiped before it.
+            if (cfg.claudeToken != null) b.addAll(List.of("--setenv", "CLAUDE_CODE_OAUTH_TOKEN", cfg.claudeToken));
             if (cfg.sandboxPodman) {
                 String sock = "unix://" + runtime + "/podman/podman.sock";
                 // DOCKER_HOST for Testcontainers / Quarkus Dev Services; CONTAINER_HOST makes the podman CLI talk
@@ -2177,10 +2193,188 @@ public class ElfRunner {
         }
     }
 
+    /**
+     * The macOS sandbox: sandbox-exec with a deny-by-default profile, made to match the Linux one. macOS can't show
+     * the agent a different home, so it gets a home of its own (the real one stays unreadable), and its Claude config
+     * is a per-run copy rather than bind mounts. It can read the system, the JDK, Maven and Claude, and write only its
+     * own directory, that home, the Maven repo, its files for the maintainer and a private temp dir (not the shared
+     * /tmp). It can't reach the Keychain (where gh and Claude keep their logins on macOS), the clipboard, other apps
+     * (Apple Events, LaunchServices) or launchd (which would run a job outside the sandbox). The network is open, as
+     * on Linux.
+     */
+    static class MacSandbox {
+
+        static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files) {
+            Path w = cfg.workDir;
+            try {
+                String sessions = Sandbox.sessionsName(cfg, cwd);
+                // This run's own dirs: named by a hash of the full path, so no two directories share them.
+                String run = sessions.length() > 60 ? sessions.substring(sessions.length() - 60) : sessions;
+                run += "-" + java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(cwd.toString().getBytes(StandardCharsets.UTF_8)), 0, 8);
+                Path home = fresh(w.resolve("homes").resolve(run));
+                Path tmp = fresh(w.resolve("tmp-runs").resolve(run));
+                Files.createSymbolicLink(home.resolve(".m2"), w.resolve("m2"));
+                Path claudeDir = claudeCopy(cfg, sessions, run);
+                List<Path> write = new ArrayList<>(List.of(home, tmp, w.resolve("m2"), claudeDir,
+                        cfg.claudeConfigDir.resolve("projects").resolve(sessions)));
+                if (cwd.startsWith(w.resolve("worktrees")) || cwd.startsWith(w.resolve("triage")) || cwd.equals(w.resolve("tmp"))) {
+                    write.add(cwd);
+                }
+                if (files != null) write.add(files);
+                List<Path> read = new ArrayList<>(cfg.toolHomes());
+                read.add(Path.of(cfg.claude).getParent());
+                read.addAll(List.of(w.resolve("cache"), w.resolve("gitconfig"), w.resolve("gh-empty"), cfg.mcpConfig));
+                List<String> b = new ArrayList<>(List.of("/usr/bin/sandbox-exec", "-p", profile(read, write), "/usr/bin/env", "-i",
+                        "HOME=" + home,
+                        "USER=" + System.getProperty("user.name"),
+                        "PATH=" + cfg.agentPath(),
+                        "JAVA_HOME=" + cfg.javaHome,
+                        "LANG=" + System.getenv().getOrDefault("LANG", "en_US.UTF-8"),
+                        "TERM=dumb",
+                        "TMPDIR=" + tmp,
+                        // Java takes its home and temp dir from the system (the real home, /var/folders), not HOME
+                        // and TMPDIR: Maven would look for ~/.m2 in the real home.
+                        "JAVA_TOOL_OPTIONS=-Duser.home=" + home + " -Djava.io.tmpdir=" + tmp,
+                        "CLAUDE_CONFIG_DIR=" + claudeDir,
+                        "DISABLE_AUTOUPDATER=1",
+                        "GH_TOKEN=elf-runner-has-no-github-token",
+                        "GH_CONFIG_DIR=" + w.resolve("gh-empty"),
+                        "GIT_CONFIG_GLOBAL=" + w.resolve("gitconfig"),
+                        "GIT_CONFIG_NOSYSTEM=1",
+                        "GIT_TERMINAL_PROMPT=0",
+                        "GIT_SSH_COMMAND=false"));
+                if (files != null) b.add("ELF_FILES=" + files);
+                if (cfg.claudeToken != null) b.add("CLAUDE_CODE_OAUTH_TOKEN=" + cfg.claudeToken);
+                b.addAll(cmd);
+                return b;
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            } catch (java.security.NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        /** An empty directory, whatever was there from the last run. */
+        static Path fresh(Path dir) throws IOException {
+            if (Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+                try (var all = Files.walk(dir)) {
+                    for (Path p : all.sorted(Comparator.reverseOrder()).toList()) Files.delete(p);
+                }
+            }
+            return Files.createDirectories(dir);
+        }
+
+        /**
+         * This run's Claude config: copies of .claude.json, CLAUDE.md and settings (whatever the run writes there is
+         * thrown away), empty agent/command/skill dirs, and a link to its own sessions (kept, so a thread can resume).
+         * The login is the token in the environment, never a file here.
+         */
+        static Path claudeCopy(Config cfg, String sessions, String runName) throws IOException {
+            Path c = cfg.claudeConfigDir;
+            Path own = Files.createDirectories(c.resolve("projects").resolve(sessions));
+            Path run = fresh(cfg.workDir.resolve("claude-runs").resolve(runName));
+            for (String f : List.of(".claude.json", "CLAUDE.md", "settings.json", "settings.local.json")) {
+                Path from = c.resolve(f);
+                if (Files.isRegularFile(from, LinkOption.NOFOLLOW_LINKS)) Files.copy(from, run.resolve(f));
+                else Files.writeString(run.resolve(f), f.endsWith(".json") ? "{}\n" : "");
+            }
+            for (String d : List.of("agents", "commands", "skills", "plugins", "output-styles", "hooks")) {
+                Files.createDirectories(run.resolve(d));
+            }
+            Files.createDirectories(run.resolve("projects"));
+            Files.createSymbolicLink(run.resolve("projects").resolve(sessions), own);
+            return run;
+        }
+
+        /** Seatbelt (SBPL) string literal. */
+        static String q(Path p) {
+            return "\"" + p.toString().replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        }
+
+        static String profile(List<Path> read, List<Path> write) throws IOException {
+            StringBuilder r = new StringBuilder();
+            for (Path p : read) {
+                r.append(" (subpath ").append(q(p)).append(")");
+                // A path through a symlink is checked as the real path.
+                if (Files.exists(p)) r.append(" (subpath ").append(q(p.toRealPath())).append(")");
+            }
+            // What it may write it may read too (Seatbelt keeps the two apart).
+            StringBuilder wr = new StringBuilder();
+            for (Path p : write) {
+                wr.append(" (subpath ").append(q(p)).append(")");
+                if (Files.exists(p)) wr.append(" (subpath ").append(q(p.toRealPath())).append(")");
+            }
+            return """
+                    (version 1)
+                    (deny default)
+
+                    ; Run programs and their children, and look at (only) themselves.
+                    (allow process-exec process-fork)
+                    (allow signal (target same-sandbox))
+                    (allow process-info* (target same-sandbox))
+                    (allow sysctl-read)
+                    (allow pseudo-tty)
+                    (allow file-ioctl)
+                    (allow ipc-posix-sem ipc-posix-shm)
+                    (allow user-preference-read)
+
+                    ; Any path can be looked up (stat), so tools can walk to what they may open; contents only below.
+                    (allow file-read-metadata)
+                    (allow file-read*
+                      (literal "/")
+                      (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/System") (subpath "/Library")
+                      (subpath "/opt") (subpath "/private/etc") (subpath "/etc") (subpath "/private/var/db/timezone")
+                      (subpath "/private/var/db/dyld") (subpath "/dev") (subpath "/Applications/Xcode.app")
+                      (subpath "/private/var/select")
+                     %s
+                     %s)
+                    (allow file-write*
+                      (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper")
+                      (regex #"^/dev/fd/") (regex #"^/dev/tty") (regex #"^/dev/ttys")
+                     %s)
+
+                    ; Network as on Linux: open. Includes the local socket DNS goes through.
+                    (allow network*)
+                    (allow system-socket)
+
+                    ; Only the system services that name lookups, TLS, logging and time need: not the Keychain
+                    ; (com.apple.SecurityServer), the clipboard, Apple Events, launchd's job submission, or
+                    ; LaunchServices (which would open apps outside the sandbox).
+                    (allow mach-lookup
+                      (global-name "com.apple.system.opendirectoryd.libinfo")
+                      (global-name "com.apple.system.opendirectoryd.membership")
+                      (global-name "com.apple.dnssd.service")
+                      (global-name "com.apple.mDNSResponder")
+                      (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+                      (global-name "com.apple.SystemConfiguration.configd")
+                      (global-name "com.apple.trustd")
+                      (global-name "com.apple.trustd.agent")
+                      (global-name "com.apple.system.notification_center")
+                      (global-name "com.apple.system.logger")
+                      (global-name "com.apple.logd")
+                      (global-name "com.apple.diagnosticd")
+                      (global-name "com.apple.timed")
+                      (global-name "com.apple.analyticsd")
+                      (global-name "com.apple.cfprefsd.daemon")
+                      (global-name "com.apple.cfprefsd.agent")
+                      (global-name "com.apple.FSEvents")
+                      (global-name "com.apple.PowerManagement.control"))
+                    (allow iokit-open (iokit-user-client-class "RootDomainUserClient"))
+                    """.formatted(r, wr, wr);
+        }
+    }
+
     // ---- config ----
 
     static class Config {
-        static final Path FILE = Path.of(System.getProperty("user.home"), ".config", "elf-runner", "config");
+        static final String HOME = System.getProperty("user.home");
+        /** Before house-elves install: the runner's own config and work dir. */
+        static final Path OLD_FILE = Path.of(HOME, ".config", "elf-runner", "config");
+        /** house-elves install writes runner.config next to the desk's config ($HOUSE_ELVES_CONFIG). */
+        static final Path NEW_FILE = Path.of(System.getenv().getOrDefault("HOUSE_ELVES_CONFIG", HOME + "/.config/house-elves"),
+                "runner.config");
+        static final Path FILE = Files.isRegularFile(NEW_FILE) || !Files.isRegularFile(OLD_FILE) ? NEW_FILE : OLD_FILE;
 
         String deskUrl;
         String token;
@@ -2198,6 +2392,11 @@ public class ElfRunner {
         boolean sandbox;
         boolean sandboxPodman;
         Path claudeConfigDir;
+        /** A long-lived Claude token (claude setup-token), or null to use the login in claudeConfigDir. */
+        String claudeToken;
+        /** The JDK and (if there is one) Maven the agent builds with. */
+        Path javaHome;
+        Path mavenHome;
 
         static Config load() throws IOException {
             if (!Files.isRegularFile(FILE)) {
@@ -2211,11 +2410,12 @@ public class ElfRunner {
                 int eq = line.indexOf('=');
                 if (eq > 0) raw.put(line.substring(0, eq).strip(), line.substring(eq + 1).strip());
             }
-            String home = System.getProperty("user.home");
+            String home = HOME;
             Config c = new Config();
             c.deskUrl = raw.getOrDefault("DESK_URL", "ws://localhost:7777/runner");
             c.token = raw.getOrDefault("RUNNER_TOKEN", "");
-            c.workDir = Path.of(raw.getOrDefault("WORK_DIR", home + "/.local/share/elf-runner"));
+            c.workDir = Path.of(raw.getOrDefault("WORK_DIR", FILE.equals(OLD_FILE) ? home + "/.local/share/elf-runner"
+                    : System.getenv().getOrDefault("HOUSE_ELVES_DATA", home + "/.local/share/house-elves") + "/runner"));
             c.maxJobs = Integer.parseInt(raw.getOrDefault("MAX_JOBS", "2"));
             c.timeoutMinutes = Integer.parseInt(raw.getOrDefault("JOB_TIMEOUT_MINUTES", "45"));
             c.claude = raw.getOrDefault("CLAUDE", "claude");
@@ -2228,7 +2428,8 @@ public class ElfRunner {
             c.gitName = raw.getOrDefault("GIT_NAME", "Elf Runner");
             c.gitEmail = raw.getOrDefault("GIT_EMAIL", "elf-runner@localhost");
             c.githubUser = raw.get("GITHUB_USER");
-            c.sandbox = !raw.getOrDefault("SANDBOX", "bwrap").equals("none");
+            c.sandbox = !raw.getOrDefault("SANDBOX", "on").equals("none");
+            c.claudeToken = raw.getOrDefault("CLAUDE_CODE_OAUTH_TOKEN", "").isBlank() ? null : raw.get("CLAUDE_CODE_OAUTH_TOKEN");
             c.sandboxPodman = Boolean.parseBoolean(raw.getOrDefault("SANDBOX_PODMAN", "false"));
             c.claudeConfigDir = c.workDir.resolve("claude");
             if (c.token.isBlank()) {
@@ -2236,6 +2437,51 @@ public class ElfRunner {
                 System.exit(1);
             }
             return c;
+        }
+
+        /** The JDK: $JAVA_HOME, else the one java on PATH belongs to, else the runner's own. */
+        static Path javaHome() throws IOException {
+            String env = System.getenv("JAVA_HOME");
+            if (env != null && isJdk(Path.of(env))) return Path.of(env).toRealPath();
+            Path java = which("java");
+            if (java != null && isJdk(java.toRealPath().getParent().getParent())) return java.toRealPath().getParent().getParent();
+            return Path.of(System.getProperty("java.home")).toRealPath();
+        }
+
+        /**
+         * A tool's home is shown to the agent whole, so it must really be one: a JDK (bin/java and lib/modules) and
+         * nothing that is or holds your home. A java wrapper script in ~/bin would otherwise make ~ its "home".
+         */
+        static boolean isJdk(Path dir) throws IOException {
+            return Files.isExecutable(dir.resolve("bin/java")) && Files.isRegularFile(dir.resolve("lib/modules"))
+                    && notHome(dir);
+        }
+
+        static boolean isMaven(Path dir) throws IOException {
+            return Files.isRegularFile(dir.resolve("bin/mvn")) && Files.isDirectory(dir.resolve("boot")) && notHome(dir);
+        }
+
+        static boolean notHome(Path dir) throws IOException {
+            Path home = Path.of(HOME).toRealPath();
+            Path real = dir.toRealPath();
+            return !home.startsWith(real) && !real.equals(home.resolve(".local")) && !real.equals(home.resolve(".config"));
+        }
+
+        /** What the sandbox shows the agent read-only besides the system: the JDK and Maven. */
+        List<Path> toolHomes() {
+            List<Path> homes = new ArrayList<>(List.of(javaHome));
+            if (mavenHome != null) homes.add(mavenHome);
+            return homes;
+        }
+
+        /** The agent's PATH: the JDK, Maven, Claude, then the system's. */
+        String agentPath() {
+            List<String> dirs = new ArrayList<>(List.of(javaHome.resolve("bin").toString()));
+            if (mavenHome != null) dirs.add(mavenHome.resolve("bin").toString());
+            dirs.add(Path.of(claude).getParent().toString());
+            if (MAC) dirs.addAll(List.of("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"));
+            else dirs.addAll(List.of("/usr/local/bin", "/usr/bin"));
+            return String.join(":", dirs);
         }
 
         /** Work dirs, the empty gh config, a credential-free global git config, and an empty MCP config by default. */
@@ -2259,11 +2505,22 @@ public class ElfRunner {
             Files.createDirectories(workDir.resolve("gh-empty"));
             Files.createDirectories(workDir.resolve("m2"));
             Files.createDirectories(claudeConfigDir);
-            if (sandbox && !Files.isExecutable(Path.of("/usr/bin/bwrap"))) {
+            if (sandbox && !MAC && !Files.isExecutable(Path.of("/usr/bin/bwrap"))) {
                 System.err.println("bubblewrap (/usr/bin/bwrap) is missing. Install it, or set SANDBOX=none to run "
                         + "the agent without isolation (it can then reach your GitHub credentials).");
                 System.exit(1);
             }
+            if (sandbox && MAC && claudeToken == null) {
+                // On macOS Claude keeps its login in the Keychain, which the sandbox keeps the agent away from.
+                System.err.println("On macOS the sandboxed Claude needs a token: " + LOGIN_HOW + ".");
+                System.exit(1);
+            }
+            javaHome = javaHome();
+            Path mvn = which("mvn");
+            Path mvnHome = mvn == null ? null : mvn.toRealPath().getParent().getParent();
+            // Homebrew's bin/mvn is a script in front of the real install in libexec.
+            if (mvnHome != null && !isMaven(mvnHome) && isMaven(mvnHome.resolve("libexec"))) mvnHome = mvnHome.resolve("libexec");
+            mavenHome = mvnHome != null && isMaven(mvnHome) ? mvnHome : null;
             // Resolve the claude launcher to its real binary: only that file's directory is bound into the sandbox.
             Path launcher = which(claude);
             if (launcher == null) {

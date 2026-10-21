@@ -25,15 +25,15 @@ It also pushes the agent's commits when you confirm a push in the desk (`git.pus
 
 ## The sandbox
 
-Agents run inside [bubblewrap](https://github.com/containers/bubblewrap). Removing tokens from the environment isn't enough: any process running as your user can read your desktop keyring over the session bus, and `gh auth token -u <account>` reads it directly. Inside the sandbox the agent sees:
+Agents run inside [bubblewrap](https://github.com/containers/bubblewrap) on Linux, and `sandbox-exec` on macOS (see below). Removing tokens from the environment isn't enough: any process running as your user can read your desktop keyring over the session bus, and `gh auth token -u <account>` reads it directly. Inside the sandbox the agent sees:
 
 | Visible | Hidden |
 |---|---|
 | `/usr` and `/etc` (read-only) | The session bus, so no keyring |
-| An empty `$HOME` containing only: `~/.sdkman` (read-only), a private `~/.m2`, the Claude binary (read-only) | `~/.config` (gh, and the other elves' tokens and app passwords) |
+| An empty `$HOME` containing only: the JDK, Maven and Claude Code folders (read-only, wherever they're installed), a private `~/.m2` | `~/.config` (gh, and the other elves' tokens and app passwords) |
 | The runner's clones, worktrees and temp dir | `~/.ssh`, the ssh-agent socket, `~/.gnupg` |
 | The runner's own Claude config dir | Your `~/.claude` (other sessions' transcripts) |
-| The network | The runner's config, the desk's `.env` |
+| The network | The runner's config, the desk's config and data |
 
 `gh` sees only a placeholder `GH_TOKEN`. git uses a global config with no credential helper, `GIT_SSH_COMMAND=false`, and anonymous HTTPS remotes. The agent can read public GitHub and commit locally, but it cannot push, comment or merge.
 
@@ -43,47 +43,37 @@ To look around inside the sandbox yourself:
 jbang ElfRunner.java --sandbox-shell bash
 ```
 
+**macOS.** There's no bubblewrap, so the agent runs under `sandbox-exec` with a deny-by-default profile: it may read the system, the tool folders and its own folders, and write only its item's clone, its own home, temp and Claude config (all per run) and the shared `~/.m2`. It can't reach your real home, the Keychain, the clipboard, LaunchServices (opening apps), Apple Events, launchd or the shared `/tmp`. Java and Maven are pointed at the agent's home (`-Duser.home`), since Java ignores `$HOME` there. Claude Code keeps its login in the Keychain on macOS, so the agent needs a token (`CLAUDE_CODE_OAUTH_TOKEN`). `test/sandbox-probe.sh` checks all of this, and CI runs it on Linux and macOS.
+
 **Podman.** With `SANDBOX_PODMAN=true`, your rootless Podman socket is bound into the sandbox. `DOCKER_HOST` and `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` point at it, and a `containers.conf` makes the `podman` CLI a client of it. That's enough for Quarkus Dev Services and Testcontainers (checked: Ryuk and Postgres start, and tests pass) and for `podman run`. The trade-off: a container can bind-mount anything your user can, including the session bus, so an agent that set out to could reach the keyring that way. It's off by default.
 
 ## Setup
 
-1. **Config.** Create `~/.config/elf-runner/config` (mode 600):
+[house-elves](https://github.com/House-elves/house-elves) installs and configures the runner with the desk: `house-elves install`. It writes `~/.config/house-elves/runner.config` (mode 600) with the desk's address and token, your `gh` account, the identity for the agent's commits, and a Claude token for the agent from `claude setup-token` (your Claude subscription, not API billing). The agent's own Claude config dir is `WORK_DIR/claude`, so it can't read your other sessions; add a `CLAUDE.md` there for instructions to the agent.
 
-   ```
-   DESK_URL=ws://localhost:7777/runner
-   RUNNER_TOKEN=<same value as ELFDESK_RUNNER_TOKEN in the desk's .env>
-   ```
+It runs the installed jar (`~/.local/share/house-elves/app/elf-runner.jar`) as a user service, so editing `ElfRunner.java` changes nothing until you deploy:
 
-2. **Claude login, once.** The sandboxed agent uses its own Claude config dir, so it can't read your other sessions. In a terminal:
+```shell
+./deploy.sh              # build the jar, swap it in, restart (refuses while an agent runs)
+house-elves logs runner
+```
 
-   ```shell
-   CLAUDE_CONFIG_DIR=~/.local/share/elf-runner/claude claude
-   ```
-
-   Run `/login`, then `/exit`. Optionally add a `CLAUDE.md` in that directory with instructions for the agent.
-
-3. **Run.** As a service (what the desk uses):
-
-   ```shell
-   ./deploy.sh            # build the jar, install the elf-runner.service unit, restart (refuses while an agent runs)
-   journalctl --user -u elf-runner -f
-   ```
-
-   It runs `~/.local/share/elf-runner/bin/elf-runner.jar`, so editing `ElfRunner.java` changes nothing until you deploy. To try a change by hand: `jbang ElfRunner.java` (stop the service first).
+To try a change by hand: `jbang ElfRunner.java` (stop the service first). An older setup's `~/.config/elf-runner/config` still works when there's no `runner.config`.
 
 ## Configuration
 
 | Key | Default | |
 |---|---|---|
 | `DESK_URL` | `ws://localhost:7777/runner` | |
+| `CLAUDE_CODE_OAUTH_TOKEN` | none (required on macOS) | The agent's Claude login, from `claude setup-token`. Without it, on Linux, the agent uses a login in `WORK_DIR/claude` |
 | `RUNNER_TOKEN` | required | Shared with the desk |
-| `WORK_DIR` | `~/.local/share/elf-runner` | Clones, worktrees, private `.m2`, Claude config |
+| `WORK_DIR` | `~/.local/share/house-elves/runner` (`~/.local/share/elf-runner` with the old config file) | Clones, worktrees, private `.m2`, Claude config |
 | `MAX_JOBS` | `2` | Jobs at once; more wait for a slot |
 | `JOB_TIMEOUT_MINUTES` | `45` | |
 | `MODEL` | Claude Code's default | |
 | `TRIAGE_MODEL` | `claude-haiku-4-5-20251001` | For the safety check |
 | `MCP_CONFIG` | none | A Claude Code MCP config file for the agent (only these servers load) |
-| `SANDBOX` | `bwrap` | `none` runs the agent unsandboxed, where it **can** reach your credentials |
+| `SANDBOX` | `bwrap` (`sandbox-exec` on macOS) | `none` runs the agent unsandboxed, where it **can** reach your credentials |
 | `SANDBOX_PODMAN` | `false` | Podman socket in the sandbox (see above) |
 | `CANARY` | none | A fixed opening word your `CLAUDE.md` asks for, stripped from answers and drafts |
 | `GIT_NAME` / `GIT_EMAIL` | `Elf Runner` | Identity for the agent's commits, which you may push to a PR. Set it to `GITHUB_USER`'s identity. It deliberately doesn't fall back to your global git config, which may be another account's |

@@ -1,0 +1,64 @@
+name: Sandbox
+
+# Checks the agent sandbox on Linux (bubblewrap) and macOS (sandbox-exec): what an agent can do (build, fetch,
+# write its own dirs) and what it can't (the real home, gh's login, the Keychain, the clipboard, other apps).
+on:
+  push:
+    paths: ['ElfRunner.java', 'test/**', '.github/workflows/sandbox.yml']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: jbangdev/setup-jbang@main
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq bubblewrap maven
+          # Ubuntu 24.04 stops unprivileged user namespaces, which bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Canaries in the real home
+        run: |
+          mkdir -p ~/.ssh ~/.config/gh
+          echo elf-secret > ~/.ssh/elf-canary
+          echo "oauth_token: elf-secret" > ~/.config/gh/hosts.yml
+          touch ~/elf-canary-file
+          if [ "$(uname)" = Darwin ]; then
+            security add-generic-password -s elf-canary -a elf -w elf-secret
+            echo elf-clipboard | pbcopy
+          fi
+      - name: Runner config, with a stand-in for claude
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/config"
+          printf '#!/bin/sh\necho stand-in claude\n' > "$RUNNER_TEMP/bin/claude" && chmod +x "$RUNNER_TEMP/bin/claude"
+          printf 'RUNNER_TOKEN=ci\nCLAUDE_CODE_OAUTH_TOKEN=ci\nWORK_DIR=/tmp/elf-runner\n' > "$RUNNER_TEMP/config/runner.config"
+          # The sandbox can't read the checkout (it's under the real home): the probe runs from its own directory.
+          mkdir -p /tmp/elf-runner/tmp && cp test/sandbox-probe.sh test/TempFile.java /tmp/elf-runner/tmp/
+      - name: Probe the sandbox
+        env:
+          HOUSE_ELVES_CONFIG: ${{ runner.temp }}/config
+        run: |
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          jbang ElfRunner.java --sandbox-shell /bin/bash /tmp/elf-runner/tmp/sandbox-probe.sh "$HOME"
+      - name: Nothing reached the real home
+        run: |
+          if [ -e ~/elf-escape ]; then echo "The sandbox wrote the real home"; exit 1; fi
+          echo "The real home is untouched"
+      - name: Nothing escaped through launchd or LaunchServices
+        if: runner.os == 'macOS'
+        run: |
+          sleep 5
+          if [ -e ~/elf-launchd-escape ]; then echo "A launchd job ran outside the sandbox"; exit 1; fi
+          if pgrep -x Calculator >/dev/null; then echo "The sandbox opened an app"; exit 1; fi
+          echo "No escape"
