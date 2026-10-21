@@ -226,6 +226,11 @@ class Elves {
      */
     synchronized Installed install(String repo, String commit) throws Exception {
         check(repo, commit);
+        // The runner's own rule, whatever the desk asks: House-elves' elves and your own, nobody else's code.
+        String owner = repo.substring(0, repo.indexOf('/'));
+        if (!owner.equalsIgnoreCase("House-elves") && (githubUser == null || !owner.equalsIgnoreCase(githubUser))) {
+            throw new IllegalArgumentException("Only elves from House-elves or " + githubUser + " can be installed");
+        }
         Files.createDirectories(dir);
         Path tmp = Files.createTempDirectory(dir, ".install-");
         try {
@@ -234,7 +239,16 @@ class Elves {
             Manifest m = parse(Files.readString(tmp.resolve("elf.yaml")), tmp);
             Path target = dir.resolve(m.name());
             if (Files.exists(target)) throw new IllegalStateException(m.name() + " is already installed");
+            // A name stays with the repo it first came from: another repo never inherits its settings and secrets.
+            Path from = state.resolve(m.name() + ".repo");
+            if (Files.exists(from) && !Files.readString(from).strip().equalsIgnoreCase(repo)) {
+                throw new IllegalStateException(m.name() + "'s settings belong to " + Files.readString(from).strip()
+                        + ". To use this one instead, delete ~/.config/" + m.name() + "/config and " + from + " first");
+            }
             Files.move(tmp, target);
+            Files.createDirectories(state);
+            Files.writeString(from, repo);
+            rememberSecrets(m);
             writeDefaults(m);
             Files.createDirectories(state);
             Files.writeString(state.resolve(m.name() + ".last"), String.valueOf(Instant.now().getEpochSecond()));
@@ -256,6 +270,7 @@ class Elves {
             Manifest m = parse(Files.readString(i.dir().resolve("elf.yaml")), i.dir());
             if (!m.name().equals(name)) throw new IOException("the new elf.yaml renames it to " + m.name());
             writeDefaults(m);
+            rememberSecrets(m);
         } catch (Exception e) {
             git(i.dir(), "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", before);
             throw new IOException("Not updated: " + ElfRunner.rootMessage(e));
@@ -296,6 +311,53 @@ class Elves {
         } catch (IOException ignored) {
         }
         ElfRunner.log("Removed " + name);
+    }
+
+    /** Keys that look like secrets are secrets, whatever an elf.yaml says. */
+    static final Pattern SECRET_KEY = Pattern.compile(".*(PASSWORD|API_KEY|TOKEN|SECRET).*");
+
+    /**
+     * Which settings are secret, and what each goes with, only ever grows: once a version of an elf said so (or the
+     * key looks like a secret), a later elf.yaml can't make it plain text the desk would show, or drop what it's tied
+     * to. Kept outside the elf's folder, so removing the elf doesn't forget it.
+     */
+    void rememberSecrets(Manifest m) throws IOException {
+        Map<String, java.util.TreeSet<String>> known = secrets(m.name());
+        for (ElfRunner.Setting s : m.settings()) {
+            if (s.kind() == ElfRunner.Kind.SECRET || SECRET_KEY.matcher(s.key()).matches()) {
+                known.computeIfAbsent(s.key(), k -> new java.util.TreeSet<>()).addAll(s.goesWith());
+            }
+        }
+        Files.createDirectories(state);
+        Files.writeString(state.resolve(m.name() + ".secrets"), ElfRunner.JSON.writeValueAsString(known));
+    }
+
+    Map<String, java.util.TreeSet<String>> secrets(String name) {
+        Map<String, java.util.TreeSet<String>> known = new TreeMap<>();
+        try {
+            JsonNode n = ElfRunner.JSON.readTree(Files.readString(state.resolve(name + ".secrets")));
+            n.fields().forEachRemaining(f -> {
+                var with = new java.util.TreeSet<String>();
+                f.getValue().forEach(x -> with.add(x.asText()));
+                known.put(f.getKey(), with);
+            });
+        } catch (Exception ignored) {
+            // none remembered yet
+        }
+        return known;
+    }
+
+    /** An installed elf's settings as the desk may show them: remembered and secret-looking keys stay secrets. */
+    List<ElfRunner.Setting> settings(Installed i) {
+        Map<String, java.util.TreeSet<String>> known = secrets(i.manifest().name());
+        List<ElfRunner.Setting> out = new ArrayList<>();
+        for (ElfRunner.Setting s : i.manifest().settings()) {
+            var with = new java.util.TreeSet<>(s.goesWith());
+            boolean secret = s.kind() == ElfRunner.Kind.SECRET || SECRET_KEY.matcher(s.key()).matches() || known.containsKey(s.key());
+            if (known.containsKey(s.key())) with.addAll(known.get(s.key()));
+            out.add(secret ? new ElfRunner.Setting(s.key(), s.label(), s.help(), ElfRunner.Kind.SECRET, 0, 0, s.dflt(), List.copyOf(with)) : s);
+        }
+        return out;
     }
 
     static void check(String repo, String commit) {
@@ -486,7 +548,22 @@ class Elves {
         }
     }
 
+    /** For elves installed before the runner kept these: which repo each came from, and its secrets. */
+    void remember() {
+        for (Installed i : installed().values()) {
+            try {
+                Files.createDirectories(state);
+                Path from = state.resolve(i.manifest().name() + ".repo");
+                if (!Files.exists(from)) Files.writeString(from, i.repo());
+                rememberSecrets(i.manifest());
+            } catch (IOException e) {
+                ElfRunner.log("Couldn't note " + i.manifest().name() + "'s repo and secrets: " + e.getMessage());
+            }
+        }
+    }
+
     void schedule() {
+        remember();
         Thread.ofVirtual().name("elf-schedules").start(() -> {
             while (true) {
                 try {
