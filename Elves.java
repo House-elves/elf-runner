@@ -44,7 +44,7 @@ class Elves {
     static final Pattern COMMIT = Pattern.compile("[0-9a-f]{40}");
     /** Names an elf can't take: House Elves' own, the folders under ~/.config that hold logins, and the desk's pages. */
     static final Set<String> RESERVED = Set.of("house-elves", "elf-runner", "elf-desk", "gh", "git", "systemd", "jbang", "claude",
-            "github", "elves", "settings", "dashboard");
+            "elves", "settings", "dashboard");
     static final Pattern TOOL = Pattern.compile("[a-z0-9][a-z0-9.-]{0,30}");
     /** A command's param becomes an option: --name=value. An action's goes in JSON, so it may be camelCase. */
     static final Pattern COMMAND_PARAM = Pattern.compile("[a-z][a-z0-9-]{0,40}");
