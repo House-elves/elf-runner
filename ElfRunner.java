@@ -57,7 +57,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.33.0"; // 0.33.0: elves can start agents (agents: true), 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.33.0"; // 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -877,6 +877,19 @@ public class ElfRunner {
                 // It asked for an agent: start it, and answer with its id instead of the request (prompt and all).
                 o.set("agent", agents.request(i, o.path("agent")));
             }
+            if (parsed instanceof ObjectNode o && (o.has("push") || o.has("squash"))) {
+                // Its agent's commits, which stay in the runner's worktree: squashed there, or pushed from there with
+                // the token the elf lends for it. The answer says how it went, and never carries the token on.
+                if (!i.manifest().agents()) throw new IllegalArgumentException(i.manifest().name() + " doesn't start agents");
+                if (o.has("squash")) o.set("squash", squash(o.path("squash")));
+                if (o.has("push")) {
+                    ObjectNode p = (ObjectNode) o.path("push");
+                    String token = p.path("token").asText("");
+                    p.remove("token");
+                    if (token.isBlank() || token.contains(" ")) throw new IllegalArgumentException("A push needs the elf's token");
+                    o.set("push", push(p, token, i.manifest().name()));
+                }
+            }
             if (parsed != null) out.set("result", parsed);
             else out.put("result", clip(last, 2000));
             return out;
@@ -1462,8 +1475,14 @@ public class ElfRunner {
     /** "Squash into one commit" without an agent: resets the PR's worktree to its head and squashes it. */
     void gitSquash(JsonNode msg) {
         ObjectNode result = JSON.createObjectNode().put("type", "git.result").put("id", msg.path("id").asText());
+        result.setAll(squash(msg.path("checkout")));
+        send(result);
+    }
+
+    /** The agent's commits on a PR as one commit on its base, in the item's worktree: {status, body: git} or {status, error}. */
+    ObjectNode squash(JsonNode checkout) {
+        ObjectNode result = JSON.createObjectNode();
         try {
-            JsonNode checkout = msg.path("checkout");
             if (!checkout.path("kind").asText().equals("PR")) throw new IllegalArgumentException("Only PRs can be squashed");
             ReentrantLock lock = lockForGit(checkout.path("repo").asText(), checkout.path("number").asInt());
             ObjectNode git;
@@ -1477,7 +1496,7 @@ public class ElfRunner {
         } catch (Exception e) {
             result.put("status", 0).put("error", rootMessage(e));
         }
-        send(result);
+        return result;
     }
 
     static List<String> lines(String s) {
@@ -1703,6 +1722,22 @@ public class ElfRunner {
      */
     void gitPush(JsonNode msg) {
         ObjectNode result = JSON.createObjectNode().put("type", "git.result").put("id", msg.path("id").asText());
+        try {
+            if (cfg.githubUser == null) throw new IllegalStateException("Set GITHUB_USER in the runner's config");
+            result.setAll(push(msg, ghToken(cfg.githubUser), cfg.githubUser));
+        } catch (Exception e) {
+            result.put("status", 0).put("error", rootMessage(e));
+        }
+        send(result);
+    }
+
+    /**
+     * Pushes an agent's commits from the item's worktree, after resetting what the agent could change in its git and
+     * checking they're the commits you read: {status: 200} or {status, error}. The token is the account's that
+     * pushes (the runner's GITHUB_USER for the desk, an elf's own for an elf), used for this push only.
+     */
+    ObjectNode push(JsonNode msg, String token, String as) {
+        ObjectNode result = JSON.createObjectNode();
         String repo = msg.path("repo").asText(), headRepo = msg.path("headRepo").asText(),
                 headRef = msg.path("headRef").asText(), from = msg.path("from").asText(), to = msg.path("to").asText();
         int number = msg.path("number").asInt();
@@ -1743,7 +1778,6 @@ public class ElfRunner {
                     throw new IllegalStateException("Refused: the commit isn't on " + repo + "'s default branch");
                 }
             }
-            if (cfg.githubUser == null) throw new IllegalStateException("Set GITHUB_USER in the runner's config");
             List<String> cmd = new ArrayList<>(List.of("git", "-c", "credential.helper=",
                     "-c", "credential.helper=!f() { echo username=x-access-token; echo \"password=$ELF_PUSH_TOKEN\"; }; f",
                     "push"));
@@ -1751,7 +1785,7 @@ public class ElfRunner {
             cmd.addAll(List.of("https://github.com/" + headRepo + ".git", to + ":refs/heads/" + headRef));
             ProcessBuilder pb = new ProcessBuilder(cmd).directory(wt.toFile()).redirectErrorStream(true);
             scrub(pb.environment());
-            pb.environment().put("ELF_PUSH_TOKEN", ghToken(cfg.githubUser));
+            pb.environment().put("ELF_PUSH_TOKEN", token);
             Process p = pb.start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             if (!p.waitFor(5, TimeUnit.MINUTES)) {
@@ -1766,7 +1800,7 @@ public class ElfRunner {
                 result.put("status", 409).put("error", why);
             } else {
                 log("Pushed " + from.substring(0, 7) + ".." + to.substring(0, 7) + " to " + headRepo + ":" + headRef
-                        + " as " + cfg.githubUser);
+                        + " as " + as);
                 replace(headFile(wt), to); // what's on GitHub now
                 result.put("status", 200).put("body", "{}");
             }
@@ -1775,7 +1809,7 @@ public class ElfRunner {
         } finally {
             if (pushLock != null) pushLock.unlock();
         }
-        send(result);
+        return result;
     }
 
     String gitOut(Path dir, String... args) throws Exception {
