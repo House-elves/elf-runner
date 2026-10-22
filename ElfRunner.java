@@ -876,15 +876,17 @@ public class ElfRunner {
             } catch (Exception e) {
                 parsed = null;
             }
-            if (parsed instanceof ObjectNode o && o.has("agent")) {
+            // An answer asks for something only in its exact shape: a preview of a post, say, has a push field too (the
+            // commits to read), which is not a request to push them.
+            if (parsed instanceof ObjectNode o && o.path("agent").isObject()) {
                 // It asked for an agent: start it, and answer with its id instead of the request (prompt and all).
                 o.set("agent", agents.request(i, o.path("agent")));
             }
-            if (parsed instanceof ObjectNode o && (o.has("push") || o.has("squash"))) {
+            if (parsed instanceof ObjectNode o && (pushRequest(o) || squashRequest(o))) {
                 // Its agent's commits, which stay in the runner's worktree: squashed there, or pushed from there with
                 // the token the elf lends for it. The answer says how it went, and never carries the token on.
                 if (!i.manifest().agents()) throw new IllegalArgumentException(i.manifest().name() + " doesn't start agents");
-                if (o.has("squash")) {
+                if (squashRequest(o)) {
                     // Its answer (the squashed commit's patch can be big) goes in the elf's agents folder, not back
                     // through the tab: {status, file} or {status, error}, the file holding what the desk's squash got.
                     ObjectNode r = squash(o.path("squash"));
@@ -898,7 +900,7 @@ public class ElfRunner {
                     }
                     o.set("squash", r);
                 }
-                if (o.has("push")) {
+                if (pushRequest(o)) {
                     ObjectNode p = (ObjectNode) o.path("push");
                     String token = p.path("token").asText("");
                     p.remove("token");
@@ -910,6 +912,16 @@ public class ElfRunner {
             else out.put("result", clip(last, 2000));
             return out;
         });
+    }
+
+    /** An elf's answer asking the runner to push: {push: {..., token}}, the token lent for the push. */
+    static boolean pushRequest(ObjectNode o) {
+        return o.path("push").isObject() && o.path("push").has("token");
+    }
+
+    /** An elf's answer asking the runner to squash a PR's commits: {squash: checkout}, the PR as a checkout. */
+    static boolean squashRequest(ObjectNode o) {
+        return o.path("squash").isObject() && o.path("squash").has("kind");
     }
 
     /**
