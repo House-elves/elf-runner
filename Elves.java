@@ -97,7 +97,7 @@ class Elves {
     /** One elf's elf.yaml, checked. {@code title}: its name on the desk (the tab's, the card's). */
     record Manifest(String name, String title, String description, String main, Path config, List<String> tools,
             List<ElfRunner.Setting> settings, Map<String, Command> commands, Refresh refresh, String dryRun,
-            List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions) {
+            List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions, boolean agents) {
 
         /** The folder in ~/.config/<name>/ that its UI may read. */
         Path data(String folder) {
@@ -239,6 +239,9 @@ class Elves {
             if (refreshSchedule != null && Calendar.parse(refreshSchedule) == null) throw new IOException("elf.yaml: the refresh schedule isn't a calendar time");
             refresh = new Refresh(refreshCommand, refreshSchedule);
         }
+        // An elf that starts agents gets their reports in its agents folder (see ElfAgents).
+        boolean agents = y.path("agents").asBoolean(false);
+        if (agents && !data.contains("agents")) data.add("agents");
         String title = clip(y.path("title").asText(name), 30);
         if (title.isEmpty()) title = name;
         String dryRun = y.path("dry-run").asText(null);
@@ -251,7 +254,7 @@ class Elves {
         }
         return new Manifest(name, title, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
                 List.copyOf(settings), commands, refresh, dryRun, lines(y.path("reads")), lines(y.path("writes")),
-                List.copyOf(data), tab, actions);
+                List.copyOf(data), tab, actions, agents);
     }
 
     /** A command's or action's params. A command's are options, so each needs a pattern or a list to be one of. */
@@ -989,6 +992,7 @@ class Elves {
                 .put("confirm", a.confirm()));
         if (m.tab() != null) n.putObject("tab").put("page", m.tab().page()).put("card", m.tab().card());
         m.data().forEach(n.putArray("data")::add);
+        n.put("agents", m.agents());
         if (m.dryRun() != null) n.put("dryRun", m.dryRun());
         m.reads().forEach(n.putArray("reads")::add);
         m.writes().forEach(n.putArray("writes")::add);

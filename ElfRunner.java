@@ -3,6 +3,7 @@
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.18.2
 //DEPS com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.2
 //SOURCES Elves.java
+//SOURCES ElfAgents.java
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -56,7 +57,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public class ElfRunner {
 
-    static final String VERSION = "0.32.2"; // 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.33.0"; // 0.33.0: elves can start agents (agents: true), 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -68,6 +69,7 @@ public class ElfRunner {
     final Object sendLock = new Object();
 
     final Elves elves;
+    final ElfAgents agents = new ElfAgents(this);
 
     ElfRunner(Config cfg) {
         this.cfg = cfg;
@@ -232,6 +234,7 @@ public class ElfRunner {
                 case "elf.data" -> elfData(msg);
                 case "elf.read" -> elfRead(msg);
                 case "elf.action" -> elfAction(msg);
+                case "elf.agentCancel" -> elfAgentCancel(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -244,12 +247,14 @@ public class ElfRunner {
     void start(JsonNode msg) {
         long job = msg.path("job").asLong();
         if (!known.add(job)) return; // already have it (resent after a reconnect)
-        send(JSON.createObjectNode().put("type", "job.accepted").put("job", job));
+        ElfAgents.Job elfJob = agents.byJob(job);
+        if (elfJob == null) send(JSON.createObjectNode().put("type", "job.accepted").put("job", job));
         try {
             if (!slots.tryAcquire()) {
                 event(job, "Waiting for a free slot (" + cfg.maxJobs + " jobs at a time)…");
                 slots.acquire();
             }
+            if (elfJob != null) agents.started(elfJob);
             ReentrantLock item = itemLock(msg.path("checkout"));
             item.lock(); // one job, push or squash on an item at a time
             try {
@@ -294,8 +299,11 @@ public class ElfRunner {
         deleteTree(files);
         Files.createDirectories(files);
         event(job, "Starting Claude Code in " + wt);
+        ElfAgents.Job elfJob = agents.byJob(job);
+        if (elfJob != null && elfJob.cancelled()) return; // stopped before Claude started
         Process p = agentProcess(cmd, wt, files).start();
         running.put(job, p);
+        if (elfJob != null && elfJob.cancelled()) kill(p); // stopped while it started
         try (OutputStream in = p.getOutputStream()) {
             in.write(msg.path("prompt").asText().getBytes(StandardCharsets.UTF_8));
         }
@@ -352,8 +360,12 @@ public class ElfRunner {
         done.set("git", !pr ? issueCommits(wt)
                 : !gitOut(wt, "rev-parse", "HEAD").equals(startSha) ? squashed(wt, checkout) : commitsSince(wt, startSha));
         if (result.path("total_cost_usd").isNumber()) done.put("cost", result.path("total_cost_usd").asDouble());
-        fitPatch(done);
-        send(done);
+        if (elfJob != null) {
+            agents.done(elfJob, done, wt);
+        } else {
+            fitPatch(done);
+            send(done);
+        }
         log("Job " + job + " done");
     }
 
@@ -855,13 +867,28 @@ public class ElfRunner {
             String last = runElf(i.manifest().name(), a.args(), JSON.writeValueAsString(values));
             log(i.manifest().name() + ": " + a.name());
             ObjectNode out = JSON.createObjectNode();
+            JsonNode parsed;
             try {
-                JsonNode parsed = JSON.readTree(last);
-                out.set("result", parsed == null ? JSON.nullNode() : parsed);
+                parsed = JSON.readTree(last);
             } catch (Exception e) {
-                out.put("result", clip(last, 2000));
+                parsed = null;
             }
+            if (parsed instanceof ObjectNode o && o.has("agent")) {
+                // It asked for an agent: start it, and answer with its id instead of the request (prompt and all).
+                o.set("agent", agents.request(i, o.path("agent")));
+            }
+            if (parsed != null) out.set("result", parsed);
+            else out.put("result", clip(last, 2000));
             return out;
+        });
+    }
+
+    /** Stops one of an elf's agents. */
+    void elfAgentCancel(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            Elves.Installed i = elves.get(msg.path("elf").asText(""));
+            agents.cancel(i.manifest().name(), msg.path("agent").asText(""));
+            return JSON.createObjectNode().put("cancelled", true);
         });
     }
 
@@ -1802,6 +1829,8 @@ public class ElfRunner {
             }
             int sent = 0;
             long total = 0;
+            ElfAgents.Job elfJob = agents.byJob(job);
+            List<Path> kept = new ArrayList<>();
             for (Path f : found) {
                 String name = f.getFileName().toString();
                 String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase(java.util.Locale.ROOT) : "";
@@ -1811,6 +1840,12 @@ public class ElfRunner {
                         : sent == MAX_FILES ? "more than " + MAX_FILES + " files" : total + size > MAX_FILES_TOTAL ? "over 60 MB in all" : null;
                 if (skip != null) {
                     event(job, "Didn't keep " + clip(name, 100) + " (" + skip + ")");
+                    continue;
+                }
+                if (elfJob != null) {
+                    kept.add(f);
+                    sent++;
+                    total += size;
                     continue;
                 }
                 // In chunks: the desk's socket keeps a small message limit.
@@ -1825,6 +1860,7 @@ public class ElfRunner {
                 sent++;
                 total += size;
             }
+            if (elfJob != null && !kept.isEmpty()) agents.files(elfJob, kept);
             if (sent > 0) event(job, "Kept " + sent + (sent == 1 ? " file" : " files") + " for you");
         } catch (Exception e) {
             event(job, "Couldn't keep the agent's files: " + rootMessage(e));
@@ -1880,11 +1916,21 @@ public class ElfRunner {
 
     void event(long job, String text) {
         if (job == 0) return; // not a job (e.g. a squash for the desk)
+        ElfAgents.Job elfJob = agents.byJob(job);
+        if (elfJob != null) {
+            agents.line(elfJob, text);
+            return;
+        }
         send(JSON.createObjectNode().put("type", "job.event").put("job", job).put("text", text));
     }
 
     void failed(long job, String error) {
         log("Job " + job + " failed: " + error);
+        ElfAgents.Job elfJob = agents.byJob(job);
+        if (elfJob != null) {
+            agents.failed(elfJob, error);
+            return;
+        }
         send(JSON.createObjectNode().put("type", "job.failed").put("job", job).put("error", error));
     }
 
