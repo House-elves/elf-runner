@@ -361,7 +361,7 @@ public class ElfRunner {
                 : !gitOut(wt, "rev-parse", "HEAD").equals(startSha) ? squashed(wt, checkout) : commitsSince(wt, startSha));
         if (result.path("total_cost_usd").isNumber()) done.put("cost", result.path("total_cost_usd").asDouble());
         if (elfJob != null) {
-            agents.done(elfJob, done, wt);
+            agents.done(elfJob, done);
         } else {
             fitPatch(done);
             send(done);

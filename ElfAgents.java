@@ -19,8 +19,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * {@code {"agent": {id, checkout, prompt, untrusted, schema, session}}}. The runner runs it the way it runs the desk's
  * jobs (the safety check, the sandbox, a worktree of the item), and keeps what happens in the elf's {@code agents}
  * folder as {@code <id>.json}: its state, the lines so far, its answer, the agent's commits and session. Files the
- * agent leaves go next to it as {@code <id>--<name>}. The elf's tab reads them; the elf itself reads them too (to post
- * an answer, or push the commits from the worktree named there).
+ * agent leaves go next to it as {@code <id>--<name>}. The elf's tab reads them, and so does the elf (to post an answer).
+ * The agent's commits stay in the runner's worktree, which only the runner's git touches.
  */
 class ElfAgents {
 
@@ -112,6 +112,7 @@ class ElfAgents {
                 runner.start(msg);
             } finally {
                 jobs.remove(job);
+                ended(j);
             }
         });
         return ElfRunner.JSON.createObjectNode().put("id", id).put("status", "queued");
@@ -164,8 +165,11 @@ class ElfAgents {
         write(j, true);
     }
 
-    /** Its answer: the structured output, the session (to follow up), the commits, and the worktree they're in. */
-    void done(Job j, ObjectNode done, Path worktree) {
+    /**
+     * Its answer: the structured output, the session (to follow up) and the commits. Not the worktree: a later agent
+     * on the same item writes there, so the elf never runs git in it; pushing goes through the runner (gitPush).
+     */
+    void done(Job j, ObjectNode done) {
         synchronized (j) {
             if (j.cancelled()) return;
             j.state.put("status", "done").put("finished", Instant.now().toString());
@@ -173,7 +177,6 @@ class ElfAgents {
             if (done.path("session").isTextual()) j.state.put("session", done.path("session").asText());
             if (done.has("git")) j.state.set("git", done.path("git"));
             if (done.has("cost")) j.state.set("cost", done.path("cost"));
-            j.state.put("worktree", worktree.toString());
         }
         write(j, true);
     }
@@ -220,6 +223,23 @@ class ElfAgents {
             ElfRunner.log("Couldn't write " + j.elf + "'s agent " + j.id + ": " + e.getMessage());
         }
         runner.send(ElfRunner.JSON.createObjectNode().put("type", "elf.changed").put("elf", j.elf).put("what", "agents"));
+    }
+
+    /**
+     * When one of its agents has ended (done, failed or stopped): the elf's agents.done action, with {id}, so the
+     * elf can take the answer in (a thread's reply, a draft). Then its tab hears "agents" again.
+     */
+    void ended(Job j) {
+        try {
+            Elves.Installed i = runner.elves.get(j.elf);
+            String action = i.manifest().agentDone();
+            if (action == null) return;
+            Elves.Action a = i.manifest().actions().get(action);
+            runner.runElf(j.elf, a.args(), ElfRunner.JSON.createObjectNode().put("id", j.id).toString());
+            runner.send(ElfRunner.JSON.createObjectNode().put("type", "elf.changed").put("elf", j.elf).put("what", "agents"));
+        } catch (Exception e) {
+            ElfRunner.log(j.elf + " couldn't take in its agent " + j.id + ": " + ElfRunner.rootMessage(e));
+        }
     }
 
     final Map<Long, Boolean> flushing = new ConcurrentHashMap<>();

@@ -97,7 +97,8 @@ class Elves {
     /** One elf's elf.yaml, checked. {@code title}: its name on the desk (the tab's, the card's). */
     record Manifest(String name, String title, String description, String main, Path config, List<String> tools,
             List<ElfRunner.Setting> settings, Map<String, Command> commands, Refresh refresh, String dryRun,
-            List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions, boolean agents) {
+            List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions, boolean agents,
+            String agentDone) {
 
         /** The folder in ~/.config/<name>/ that its UI may read. */
         Path data(String folder) {
@@ -240,7 +241,11 @@ class Elves {
             refresh = new Refresh(refreshCommand, refreshSchedule);
         }
         // An elf that starts agents gets their reports in its agents folder (see ElfAgents).
-        boolean agents = y.path("agents").asBoolean(false);
+        // agents: true, or {done: <action>}, which the runner runs with {id} when one of its agents ends.
+        JsonNode ag = y.path("agents");
+        boolean agents = ag.isObject() || ag.asBoolean(false);
+        String agentDone = ag.path("done").asText(null);
+        if (agentDone != null && !actions.containsKey(agentDone)) throw new IOException("elf.yaml: agents.done names an unknown action");
         if (agents && !data.contains("agents")) data.add("agents");
         String title = clip(y.path("title").asText(name), 30);
         if (title.isEmpty()) title = name;
@@ -254,7 +259,7 @@ class Elves {
         }
         return new Manifest(name, title, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
                 List.copyOf(settings), commands, refresh, dryRun, lines(y.path("reads")), lines(y.path("writes")),
-                List.copyOf(data), tab, actions, agents);
+                List.copyOf(data), tab, actions, agents, agentDone);
     }
 
     /** A command's or action's params. A command's are options, so each needs a pattern or a list to be one of. */
