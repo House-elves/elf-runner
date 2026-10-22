@@ -59,7 +59,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.34.0"; // 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.35.0"; // 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -237,6 +237,7 @@ public class ElfRunner {
                 case "elf.read" -> elfRead(msg);
                 case "elf.action" -> elfAction(msg);
                 case "elf.agentCancel" -> elfAgentCancel(msg);
+                case "house.update" -> houseUpdate(msg);
                 default -> { }
             }
         } catch (Exception e) {
@@ -909,6 +910,50 @@ public class ElfRunner {
             else out.put("result", clip(last, 2000));
             return out;
         });
+    }
+
+    /**
+     * Updates Elf Desk and its runner to their latest releases, as {@code house-elves install} does (the newest
+     * installer too), in a process of its own: it stops and restarts this runner and the desk. Not while an agent or
+     * an elf is at work, which the restart would cut off.
+     */
+    void houseUpdate(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            List<String> busy = new ArrayList<>();
+            if (!running.isEmpty() || !known.isEmpty()) busy.add("an agent is working");
+            if (!agents.jobs.isEmpty()) busy.add("an elf's agent is working");
+            if (!elves.runningKeys().isEmpty()) busy.add(String.join(", ", elves.runningKeys()) + " is running");
+            if (!busy.isEmpty()) throw new IllegalStateException("Not now: " + String.join("; ", busy) + ". Update when it's done.");
+            List<String> install = List.of(Elves.jbang(), "--fresh", "run", "house-elves@House-elves", "install", "--no-open");
+            Path log = Config.DATA.resolve("update.log");
+            ProcessBuilder pb;
+            if (MAC) {
+                // Out of this runner's process group, so it outlives the restart it causes.
+                List<String> cmd = new ArrayList<>(List.of("/bin/sh", "-c", "nohup \"$@\" >> '" + log + "' 2>&1 &", "update"));
+                cmd.addAll(install);
+                pb = new ProcessBuilder(cmd);
+            } else {
+                // Its own systemd unit: stopping the runner's unit doesn't stop it.
+                List<String> cmd = new ArrayList<>(List.of("systemd-run", "--user", "--collect", "--quiet",
+                        "--unit=house-elves-update-" + System.currentTimeMillis(), "--setenv=PATH=" + System.getenv("PATH")));
+                serviceEnv().forEach((k, v) -> cmd.add("--setenv=" + k + "=" + v));
+                cmd.addAll(install);
+                pb = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()));
+            }
+            Process p = pb.start();
+            if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) throw new IOException("Couldn't start the update (see " + log + ")");
+            log("Updating Elf Desk and the runner (house-elves install)");
+            return JSON.createObjectNode().put("started", true);
+        });
+    }
+
+    /** What the services were started with to find this install's config and data, for a process that outlives them. */
+    static Map<String, String> serviceEnv() {
+        Map<String, String> env = new java.util.LinkedHashMap<>();
+        for (String k : List.of("HOUSE_ELVES_CONFIG", "HOUSE_ELVES_DATA", "HOUSE_ELVES_INSTANCE", "HOUSE_ELVES_PORT")) {
+            if (System.getenv(k) != null) env.put(k, System.getenv(k));
+        }
+        return env;
     }
 
     /** Stops one of an elf's agents. */
