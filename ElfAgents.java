@@ -158,9 +158,15 @@ class ElfAgents {
     }
 
     void failed(Job j, String error) {
+        failed(j, error, null);
+    }
+
+    /** @param cost what it cost before it failed, or null */
+    void failed(Job j, String error, Double cost) {
         synchronized (j) {
             if (j.state.path("status").asText().equals("cancelled")) return;
             j.state.put("status", "failed").put("error", error).put("finished", Instant.now().toString());
+            if (cost != null) j.state.put("cost", cost);
         }
         write(j, true);
     }

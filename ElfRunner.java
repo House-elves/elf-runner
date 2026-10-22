@@ -351,7 +351,8 @@ public class ElfRunner {
                     : result == null ? "Claude Code exited with code " + exit
                     : result.path("result").asText(result.path("subtype").asText("no structured answer"))
                             + loginHint(result);
-            failed(job, why);
+            // It cost something all the same: the elf counts it.
+            failed(job, why, result != null && result.path("total_cost_usd").isNumber() ? result.path("total_cost_usd").asDouble() : null);
             return;
         }
         ObjectNode output = (ObjectNode) result.path("structured_output");
@@ -2031,10 +2032,15 @@ public class ElfRunner {
     }
 
     void failed(long job, String error) {
+        failed(job, error, null);
+    }
+
+    /** @param cost what the run cost before it failed (Claude Code's total_cost_usd), or null */
+    void failed(long job, String error, Double cost) {
         log("Job " + job + " failed: " + error);
         ElfAgents.Job elfJob = agents.byJob(job);
         if (elfJob != null) {
-            agents.failed(elfJob, error);
+            agents.failed(elfJob, error, cost);
             return;
         }
         send(JSON.createObjectNode().put("type", "job.failed").put("job", job).put("error", error));
