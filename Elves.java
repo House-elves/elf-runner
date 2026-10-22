@@ -82,9 +82,10 @@ class Elves {
 
     /**
      * The elf's tab on the desk, drawn by its own UI: {@code page} is a module in its ui/ folder, run in a sandboxed
-     * frame. {@code card}: it also has a card on the dashboard.
+     * frame. {@code card}: it also has a card on the dashboard. {@code settings}: its page also draws its own settings,
+     * at the top of the desk's Settings pop-up for it.
      */
-    record Tab(String page, boolean card) {
+    record Tab(String page, boolean card, boolean settings) {
     }
 
     /**
@@ -217,7 +218,7 @@ class Elves {
             String page = text(t, "page");
             if (!UI_FILE.matcher(page).matches() || !page.endsWith(".js")) throw new IOException("elf.yaml: the tab's page is a .js file in ui/");
             if (folder != null && !Files.isRegularFile(folder.resolve(page))) throw new IOException("elf.yaml: there's no " + page);
-            tab = new Tab(page, t.path("card").asBoolean(false));
+            tab = new Tab(page, t.path("card").asBoolean(false), t.path("settings").asBoolean(false));
             refreshCommand = t.path("refresh").asText(null);
         }
         if (y.hasNonNull("refresh")) {
@@ -1002,7 +1003,8 @@ class Elves {
         var actions = n.putArray("actions");
         m.actions().values().forEach(a -> actions.addObject().put("name", a.name()).put("label", a.label()).put("ask", a.ask())
                 .put("confirm", a.confirm()));
-        if (m.tab() != null) n.putObject("tab").put("page", m.tab().page()).put("card", m.tab().card());
+        if (m.tab() != null) n.putObject("tab").put("page", m.tab().page()).put("card", m.tab().card())
+                .put("settings", m.tab().settings());
         m.data().forEach(n.putArray("data")::add);
         n.put("agents", m.agents());
         if (m.version() != null) n.put("version", m.version());
