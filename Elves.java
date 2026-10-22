@@ -42,6 +42,7 @@ class Elves {
     static final Pattern KEY = Pattern.compile("[A-Z][A-Z0-9_]{0,60}");
     static final Pattern ARG = Pattern.compile("--[a-z0-9-]{1,40}(=[A-Za-z0-9._:-]{1,80})?");
     static final Pattern COMMIT = Pattern.compile("[0-9a-f]{40}");
+    static final Pattern VERSION = Pattern.compile("\\d{1,4}(\\.\\d{1,4}){0,3}([.-][A-Za-z0-9]{1,20})?");
     /** Names an elf can't take: House Elves' own, the folders under ~/.config that hold logins, and the desk's pages. */
     static final Set<String> RESERVED = Set.of("house-elves", "elf-runner", "elf-desk", "gh", "git", "systemd", "jbang", "claude",
             "elves", "settings", "dashboard");
@@ -98,7 +99,7 @@ class Elves {
     record Manifest(String name, String title, String description, String main, Path config, List<String> tools,
             List<ElfRunner.Setting> settings, Map<String, Command> commands, Refresh refresh, String dryRun,
             List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions, boolean agents,
-            String agentDone) {
+            String agentDone, String version, String author) {
 
         /** The folder in ~/.config/<name>/ that its UI may read. */
         Path data(String folder) {
@@ -247,6 +248,12 @@ class Elves {
         String agentDone = ag.path("done").asText(null);
         if (agentDone != null && !actions.containsKey(agentDone)) throw new IOException("elf.yaml: agents.done names an unknown action");
         if (agents && !data.contains("agents")) data.add("agents");
+        // Its own version (1.2.0) and who made it (a GitHub login), for the desk to show; both optional.
+        String version = y.path("version").asText(null);
+        if (version != null && !VERSION.matcher(version).matches()) throw new IOException("elf.yaml: version is like 1.2.0");
+        String author = y.path("author").asText(null);
+        if (author != null) author = author.replaceFirst("^@", "");
+        if (author != null && !ElfRunner.LOGIN.matcher(author).matches()) throw new IOException("elf.yaml: author is a GitHub login");
         String title = clip(y.path("title").asText(name), 30);
         if (title.isEmpty()) title = name;
         String dryRun = y.path("dry-run").asText(null);
@@ -259,7 +266,7 @@ class Elves {
         }
         return new Manifest(name, title, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
                 List.copyOf(settings), commands, refresh, dryRun, lines(y.path("reads")), lines(y.path("writes")),
-                List.copyOf(data), tab, actions, agents, agentDone);
+                List.copyOf(data), tab, actions, agents, agentDone, version, author);
     }
 
     /** A command's or action's params. A command's are options, so each needs a pattern or a list to be one of. */
@@ -998,6 +1005,8 @@ class Elves {
         if (m.tab() != null) n.putObject("tab").put("page", m.tab().page()).put("card", m.tab().card());
         m.data().forEach(n.putArray("data")::add);
         n.put("agents", m.agents());
+        if (m.version() != null) n.put("version", m.version());
+        if (m.author() != null) n.put("author", m.author());
         if (m.dryRun() != null) n.put("dryRun", m.dryRun());
         m.reads().forEach(n.putArray("reads")::add);
         m.writes().forEach(n.putArray("writes")::add);

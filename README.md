@@ -21,7 +21,7 @@ It also starts mvnpm-dependabot when you ask from the desk (`mvnpm.run`, Linux o
 
 ### Elves
 
-It installs and runs elves for the desk (its + page, and each elf's settings). An elf is a repo with an `elf.yaml` (see [weekly-status's](https://github.com/House-elves/weekly-status/blob/main/elf.yaml)); its name and title, settings, commands, its tab and how it refreshes, and what it reads and writes.
+It installs and runs elves for the desk (its + page, and each elf's settings). An elf is a repo with an `elf.yaml` (see [weekly-status's](https://github.com/House-elves/weekly-status/blob/main/elf.yaml)); its name and title, its version and author (`version: 1.0.0`, `author: "@login"`, shown by the desk), settings, commands, its tab and how it refreshes, what it reads and writes, and whether it starts agents (`agents: {done: <action>}`).
 
 - `elf.install` clones the repo into `~/.local/share/house-elves/elves/<name>` and checks out the given commit, `elf.changes` shows the commits and diff to a newer one, `elf.update` moves to it, and `elf.remove` deletes the clone (its settings stay). The clone never moves otherwise, so only code you looked at runs.
 - The runner installs only elves from House-elves or your own account (`GITHUB_USER`), whatever the desk asks, and a name stays with the repo it first came from, so another repo never inherits an elf's settings. A setting that was ever secret (or whose key has PASSWORD, API_KEY, TOKEN or SECRET in it) stays secret, with what it goes with, whatever a later `elf.yaml` says, and a version that leaves out a remembered secret or what it goes with isn't installed.

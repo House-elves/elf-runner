@@ -19,6 +19,8 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: jbangdev/setup-jbang@main
+      # The runner says which release it is (the desk shows it).
+      - run: sed -i "s/static final String RELEASE = \"dev\";/static final String RELEASE = \"$GITHUB_REF_NAME\";/" ElfRunner.java && grep -q "RELEASE = \"$GITHUB_REF_NAME\"" ElfRunner.java
       - run: jbang export fatjar --output elf-runner.jar ElfRunner.java
       - env:
           GH_TOKEN: ${{ github.token }}
