@@ -881,7 +881,20 @@ public class ElfRunner {
                 // Its agent's commits, which stay in the runner's worktree: squashed there, or pushed from there with
                 // the token the elf lends for it. The answer says how it went, and never carries the token on.
                 if (!i.manifest().agents()) throw new IllegalArgumentException(i.manifest().name() + " doesn't start agents");
-                if (o.has("squash")) o.set("squash", squash(o.path("squash")));
+                if (o.has("squash")) {
+                    // Its answer (the squashed commit's patch can be big) goes in the elf's agents folder, not back
+                    // through the tab: {status, file} or {status, error}, the file holding what the desk's squash got.
+                    ObjectNode r = squash(o.path("squash"));
+                    if (r.has("body")) {
+                        Path dir = i.manifest().data("agents");
+                        Files.createDirectories(dir);
+                        String file = "squash-" + System.currentTimeMillis() + ".json";
+                        Files.writeString(dir.resolve(file), r.path("body").asText());
+                        r.remove("body");
+                        r.put("file", file);
+                    }
+                    o.set("squash", r);
+                }
                 if (o.has("push")) {
                     ObjectNode p = (ObjectNode) o.path("push");
                     String token = p.path("token").asText("");
