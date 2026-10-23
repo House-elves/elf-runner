@@ -16,8 +16,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Agents for elves: an elf whose elf.yaml says {@code agents: true} may start one from an action, by answering with
- * {@code {"agent": {id, checkout, prompt, untrusted, schema, session}}}. The runner runs it the way it runs the desk's
- * jobs (the safety check, the sandbox, a worktree of the item), and keeps what happens in the elf's {@code agents}
+ * {@code {"agent": {id, checkout, prompt, untrusted, schema, session, readOnly}}}. The runner runs it the way it runs the desk's
+ * jobs (the safety check, the sandbox, a worktree of the item, or of a repo's default branch for kind REPO), and keeps what happens in the elf's {@code agents}
  * folder as {@code <id>.json}: its state, the lines so far, its answer, the agent's commits and session. Files the
  * agent leaves go next to it as {@code <id>--<name>}. The elf's tab reads them, and so does the elf (to post an answer).
  * The agent's commits stay in the runner's worktree, which only the runner's git touches.
@@ -73,9 +73,10 @@ class ElfAgents {
         if (!ID.matcher(id).matches()) throw new IllegalArgumentException("An agent's id is lower case letters, digits and -");
         JsonNode checkout = req.path("checkout");
         String repo = checkout.path("repo").asText("");
-        if (!ElfRunner.REPO_NAME.matcher(repo).matches() || checkout.path("number").asInt() <= 0
-                || !List.of("PR", "ISSUE").contains(checkout.path("kind").asText())) {
-            throw new IllegalArgumentException("An agent works on one PR or issue: checkout {repo, number, kind}");
+        boolean whole = checkout.path("kind").asText().equals("REPO");
+        if (!ElfRunner.REPO_NAME.matcher(repo).matches() || (whole ? checkout.path("number").asInt() != 0 : checkout.path("number").asInt() <= 0)
+                || !List.of("PR", "ISSUE", "REPO").contains(checkout.path("kind").asText())) {
+            throw new IllegalArgumentException("An agent works on one PR or issue, or a repo: checkout {repo, number, kind} (REPO: number 0)");
         }
         String prompt = req.path("prompt").asText("");
         String schema = req.path("schema").asText("");
@@ -107,6 +108,8 @@ class ElfAgents {
         ObjectNode co = checkout.deepCopy();
         msg.set("checkout", co);
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
+        // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
+        if (req.path("readOnly").asBoolean(false)) msg.put("readOnly", true);
         Thread.ofVirtual().start(() -> {
             try {
                 runner.start(msg);
