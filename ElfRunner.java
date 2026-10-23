@@ -59,7 +59,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.37.1"; // 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.38.0"; // 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -289,9 +289,17 @@ public class ElfRunner {
             }
             event(job, "Safety check passed.");
         }
+        boolean web = msg.path("web").asBoolean(false);
         JsonNode checkout = msg.path("checkout");
+        if (web) {
+            // An agent on the web gets a clone of its own, made afresh each time: the repo as GitHub has it, and
+            // nothing another agent left in a clone of it (files, commits, its git's history).
+            ObjectNode own = checkout.deepCopy();
+            own.put("web", true);
+            checkout = own;
+        }
         // A new action starts from the PR's current head; a follow-up keeps the worktree as the agent left it.
-        boolean keep = msg.path("session").isTextual() && !checkout.path("reset").asBoolean();
+        boolean keep = msg.path("session").isTextual() && !checkout.path("reset").asBoolean() && !web;
         Path wt = worktree(job, checkout, keep);
         String startSha = gitOut(wt, "rev-parse", "HEAD");
 
@@ -301,7 +309,11 @@ public class ElfRunner {
         // nothing it reads can leave but its answer, which you read. Claude Code's own permissions, not skipped
         // here, keep those to the checkout: anything outside it (the runner's Claude login, say) is refused.
         if (msg.path("readOnly").asBoolean(false)) {
-            cmd.addAll(List.of("--tools", "Read,Grep,Glob", "--permission-mode", "default", "--setting-sources", ""));
+            // web (only with a public repo and no one else's text, see ElfAgents): it may also search and read the web.
+            cmd.addAll(List.of("--tools", web ? "Read,Grep,Glob,WebSearch,WebFetch" : "Read,Grep,Glob", "--permission-mode", "default",
+                    "--setting-sources", ""));
+            // Not this machine or its network: the desk, a dev mode, a router, a cloud's metadata service.
+            if (web) cmd.addAll(List.of("--allowedTools", "WebSearch,WebFetch", "--disallowedTools", String.join(",", LOCAL_FETCH)));
         } else {
             cmd.addAll(List.of("--dangerously-skip-permissions", "--mcp-config", cfg.mcpConfig.toString()));
         }
@@ -1275,7 +1287,12 @@ public class ElfRunner {
         boolean whole = checkout.path("kind").asText().equals("REPO");
         if (!REPO_NAME.matcher(repo).matches() || (whole ? number != 0 : number <= 0)) throw new IllegalArgumentException("Bad item " + repo + "#" + number);
 
-        Path wt = itemDir(repo, number);
+        boolean web = checkout.path("web").asBoolean(false);
+        Path wt = web ? webDir(repo) : itemDir(repo, number);
+        if (web) {
+            deleteTree(wt);
+            if (Files.exists(wt, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Couldn't clear the web agent's clone " + wt);
+        }
         Path cache = cache(job, repo, pr ? number : 0);
         sanitizeItem(repo, wt);
         boolean fresh = !Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS);
@@ -1314,6 +1331,16 @@ public class ElfRunner {
         return cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
     }
 
+    /** What a web agent may never fetch: names and addresses of this machine and its local network. */
+    static final List<String> LOCAL_FETCH = List.of("localhost", "*.localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1",
+            "169.254.169.254", "metadata.google.internal", "*.local", "*.internal", "*.lan", "*.home.arpa", "*.corp")
+            .stream().map(d -> "WebFetch(domain:" + d + ")").toList();
+
+    /** A web agent's clone (see runJob): its own, never an item's, made afresh for each run. */
+    Path webDir(String repo) {
+        return cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_web");
+    }
+
     Path cacheDir(String repo) {
         return cfg.workDir.resolve("cache").resolve(repo + ".git");
     }
@@ -1329,13 +1356,19 @@ public class ElfRunner {
                 Files.createDirectories(cache.getParent());
                 Path tmp = cache.resolveSibling(cache.getFileName() + ".new");
                 removeNoFollow(tmp);
-                git(null, "clone", "-q", "--bare", "--filter=blob:none", "https://github.com/" + repo + ".git", tmp.toString());
+                // A public repo's file contents come from GitHub as they're needed. A private one's all come now: the
+                // sandbox has no token to fetch them later.
+                if (ElfAgents.isPublic(repo)) {
+                    gitAuth(null, "clone", "-q", "--bare", "--filter=blob:none", "https://github.com/" + repo + ".git", tmp.toString());
+                } else {
+                    gitAuth(null, "clone", "-q", "--bare", "https://github.com/" + repo + ".git", tmp.toString());
+                }
                 Files.move(tmp, cache);
             } else {
                 event(job, "Fetching " + repo + "…");
-                git(cache, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/heads/*");
+                gitAuth(cache, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/heads/*");
             }
-            if (pr > 0) git(cache, "fetch", "-q", "origin", "+refs/pull/" + pr + "/head:refs/pull/" + pr + "/head");
+            if (pr > 0) gitAuth(cache, "fetch", "-q", "origin", "+refs/pull/" + pr + "/head:refs/pull/" + pr + "/head");
             return cache;
         } finally {
             lock.unlock();
@@ -1912,13 +1945,34 @@ public class ElfRunner {
         return out;
     }
 
+    /**
+     * git with GitHub access as GITHUB_USER, for the repos' caches only (which only the runner writes): a private
+     * repo, yours, can be cloned and fetched. The token is gh's, handed to this one command through a credential
+     * helper, never written down; without a GITHUB_USER it's plain git.
+     */
+    void gitAuth(Path dir, String... args) throws Exception {
+        if (cfg.githubUser == null) {
+            git(dir, args);
+            return;
+        }
+        List<String> all = new ArrayList<>(List.of("-c", "credential.helper=",
+                "-c", "credential.helper=!f() { echo username=x-access-token; echo \"password=$ELF_PULL_TOKEN\"; }; f"));
+        all.addAll(List.of(args));
+        gitEnv(dir, Map.of("ELF_PULL_TOKEN", ghToken(cfg.githubUser)), all.toArray(String[]::new));
+    }
+
     void git(Path dir, String... args) throws Exception {
+        gitEnv(dir, Map.of(), args);
+    }
+
+    void gitEnv(Path dir, Map<String, String> env, String... args) throws Exception {
         List<String> cmd = new ArrayList<>();
         cmd.add("git");
         cmd.addAll(List.of(args));
         ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
         if (dir != null) pb.directory(dir.toFile());
         scrub(pb.environment());
+        pb.environment().putAll(env);
         Process p = pb.start();
         String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         if (!p.waitFor(15, TimeUnit.MINUTES)) {

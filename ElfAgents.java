@@ -16,7 +16,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Agents for elves: an elf whose elf.yaml says {@code agents: true} may start one from an action, by answering with
- * {@code {"agent": {id, checkout, prompt, untrusted, schema, session, readOnly}}}. The runner runs it the way it runs the desk's
+ * {@code {"agent": {id, checkout, prompt, untrusted, schema, session, readOnly, web}}}. The runner runs it the way it runs the desk's
  * jobs (the safety check, the sandbox, a worktree of the item, or of a repo's default branch for kind REPO), and keeps what happens in the elf's {@code agents}
  * folder as {@code <id>.json}: its state, the lines so far, its answer, the agent's commits and session. Files the
  * agent leaves go next to it as {@code <id>--<name>}. The elf's tab reads them, and so does the elf (to post an answer).
@@ -35,6 +35,8 @@ class ElfAgents {
         final Path dir;
         final ObjectNode state;
         long written;
+        /** It could read the web: its session isn't handed back, so no later agent resumes what it read there. */
+        boolean web;
 
         synchronized boolean cancelled() {
             return state.path("status").asText().equals("cancelled");
@@ -87,6 +89,17 @@ class ElfAgents {
         } catch (Exception e) {
             throw new IllegalArgumentException("An agent's schema is a JSON schema");
         }
+        // web: it may also search and read the web (an elf working out how to do something new). What it can read and
+        // send out is then only what anyone may: a public repo, and nobody else's words. Nor an earlier session's:
+        // what it read then (someone's words, another checkout) would go along. Checked before anything is started.
+        boolean web = req.path("web").asBoolean(false);
+        if (web) {
+            if (!req.path("readOnly").asBoolean(false) || !whole || !req.path("untrusted").asText("").isBlank()
+                    || (req.path("session").isTextual() && !req.path("session").asText().isBlank())) {
+                throw new IllegalArgumentException("An agent on the web only reads, a repo, afresh, and no one else's text");
+            }
+            if (!isPublic(repo)) throw new IllegalArgumentException("An agent on the web only reads a public repo");
+        }
         Path dir = m.data("agents");
         Files.createDirectories(dir);
         synchronized (this) {
@@ -106,10 +119,18 @@ class ElfAgents {
         ObjectNode msg = ElfRunner.JSON.createObjectNode().put("job", job).put("prompt", prompt)
                 .put("untrusted", req.path("untrusted").asText("")).put("schema", schema);
         ObjectNode co = checkout.deepCopy();
+        co.remove("web"); // the runner's own mark (a web agent's clone), never the elf's to set
         msg.set("checkout", co);
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
         if (req.path("readOnly").asBoolean(false)) msg.put("readOnly", true);
+        if (web) {
+            msg.put("web", true);
+            j.web = true;
+            // Its whole prompt and answer's shape go through the safety check: an elf that put someone's words there,
+            // not in untrusted, still doesn't hand an injection to an agent that can reach the web.
+            msg.put("untrusted", prompt + "\n\n" + schema);
+        }
         Thread.ofVirtual().start(() -> {
             try {
                 runner.start(msg);
@@ -119,6 +140,19 @@ class ElfAgents {
             }
         });
         return ElfRunner.JSON.createObjectNode().put("id", id).put("status", "queued");
+    }
+
+    /** The repo is public: GitHub shows it to anyone (without a token, a private one is a 404). */
+    static boolean isPublic(String repo) {
+        try {
+            var r = java.net.http.HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(
+                    java.net.URI.create("https://api.github.com/repos/" + repo)).timeout(java.time.Duration.ofSeconds(20))
+                    .header("Accept", "application/vnd.github+json").header("User-Agent", "elf-runner").build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            return r.statusCode() == 200 && !ElfRunner.JSON.readTree(r.body()).path("private").asBoolean(true);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -183,7 +217,7 @@ class ElfAgents {
             if (j.cancelled()) return;
             j.state.put("status", "done").put("finished", Instant.now().toString());
             j.state.set("output", done.path("output"));
-            if (done.path("session").isTextual()) j.state.put("session", done.path("session").asText());
+            if (done.path("session").isTextual() && !j.web) j.state.put("session", done.path("session").asText());
             if (done.has("git")) j.state.set("git", done.path("git"));
             if (done.has("cost")) j.state.set("cost", done.path("cost"));
         }

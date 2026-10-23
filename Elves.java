@@ -428,8 +428,15 @@ class Elves {
         // What a public repo mustn't carry.
         String author = m.author() == null ? "" : m.author().toLowerCase(Locale.ROOT);
         try (var files = Files.walk(folder)) {
-            for (Path f : files.filter(Files::isRegularFile).toList()) {
+            for (Path f : files.toList()) {
                 Path rel = folder.relativize(f);
+                if (rel.startsWith(".git")) continue;
+                // An elf is plain files: a link could point anywhere on this machine, so nothing behind one is read.
+                if (Files.isSymbolicLink(f)) {
+                    problems.add(rel + " is a symlink: an elf is plain files.");
+                    continue;
+                }
+                if (!Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
                 if (rel.startsWith(".git") || rel.startsWith("target") || !TEXT_FILE.matcher(rel.getFileName().toString()).matches()) continue;
                 if (Files.size(f) > 2_000_000) {
                     warnings.add(rel + " is big for an elf (" + Files.size(f) / 1000 + " KB).");
