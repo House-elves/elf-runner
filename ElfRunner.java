@@ -292,11 +292,15 @@ public class ElfRunner {
         String startSha = gitOut(wt, "rev-parse", "HEAD");
 
         List<String> cmd = new ArrayList<>(List.of(cfg.claude, "-p", "--output-format", "stream-json", "--verbose",
-                "--json-schema", msg.path("schema").asText(), "--dangerously-skip-permissions", "--strict-mcp-config"));
+                "--json-schema", msg.path("schema").asText(), "--strict-mcp-config"));
         // A read-only agent (an elf's, reading someone's private words) has only Read, Grep and Glob, and no MCP:
-        // nothing it reads can leave but its answer, which you read.
-        if (msg.path("readOnly").asBoolean(false)) cmd.addAll(List.of("--tools", "Read,Grep,Glob"));
-        else cmd.addAll(List.of("--mcp-config", cfg.mcpConfig.toString()));
+        // nothing it reads can leave but its answer, which you read. Claude Code's own permissions, not skipped
+        // here, keep those to the checkout: anything outside it (the runner's Claude login, say) is refused.
+        if (msg.path("readOnly").asBoolean(false)) {
+            cmd.addAll(List.of("--tools", "Read,Grep,Glob", "--permission-mode", "default", "--setting-sources", ""));
+        } else {
+            cmd.addAll(List.of("--dangerously-skip-permissions", "--mcp-config", cfg.mcpConfig.toString()));
+        }
         cmd.addAll(List.of("--append-system-prompt", AGENT_RULES + timeRule(cfg.timeoutMinutes)));
         if (cfg.model != null) cmd.addAll(List.of("--model", cfg.model));
         if (msg.path("session").isTextual()) cmd.addAll(List.of("--resume", msg.path("session").asText()));
