@@ -529,10 +529,14 @@ class Elves {
      */
     synchronized Installed install(String repo, String commit) throws Exception {
         check(repo, commit);
-        // The runner's own rule, whatever the desk asks: House-elves' elves and your own, nobody else's code.
+        // The runner's own rule, whatever the desk asks: House-elves' elves, your own, and those from where you said
+        // elves may also come from (ELF_SOURCES), nobody else's code.
         String owner = repo.substring(0, repo.indexOf('/'));
-        if (!owner.equalsIgnoreCase("House-elves") && (githubUser == null || !owner.equalsIgnoreCase(githubUser))) {
-            throw new IllegalArgumentException("Only elves from House-elves or " + githubUser + " can be installed");
+        List<String> sources = ElfRunner.elfSources();
+        if (!owner.equalsIgnoreCase("House-elves") && (githubUser == null || !owner.equalsIgnoreCase(githubUser))
+                && sources.stream().noneMatch(x -> x.equalsIgnoreCase(owner) || x.equalsIgnoreCase(repo))) {
+            throw new IllegalArgumentException("Only elves from House-elves, " + githubUser
+                    + " or the places in the + page's Settings can be installed");
         }
         Files.createDirectories(dir);
         Path tmp = Files.createTempDirectory(dir, ".install-");
