@@ -378,6 +378,95 @@ class Elves {
         return ElfRunner.clip(s.strip(), max);
     }
 
+    // ---- checking an elf before it's installed ----
+
+    /** What a published elf mustn't carry: tokens and keys, by their well-known prefixes, and private keys. */
+    static final Pattern LEAK = Pattern.compile("gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-ant-[A-Za-z0-9_-]{20,}"
+            + "|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----");
+    static final Pattern EMAIL_IN_TEXT = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}");
+    /** Text files the leak check reads; the rest (images, fonts) it leaves alone. */
+    static final Pattern TEXT_FILE = Pattern.compile(".*\\.(java|js|css|json|yaml|yml|md|txt|properties|xml|html|sh|svg)|[^.]*");
+
+    /**
+     * --check-elf: reads an elf's folder the way installing it does (its elf.yaml, every file it names), then what
+     * the desk can't check for you: that it says what it reads and writes, and carries no tokens, keys or email
+     * addresses but its author's. Prints what it found; 0 if it installs, 1 if it doesn't.
+     */
+    static int checkElf(Path folder) {
+        Manifest m;
+        try {
+            m = parse(Files.readString(folder.resolve("elf.yaml")), folder);
+        } catch (Exception e) {
+            System.out.println("It won't install: " + ElfRunner.rootMessage(e));
+            return 1;
+        }
+        List<String> problems = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        if (m.version() == null) warnings.add("It has no version: the desk shows a new version as an update.");
+        if (m.author() == null) warnings.add("It has no author (your GitHub login).");
+        if (m.description().isBlank()) problems.add("It has no description: the + page shows it.");
+        if (m.reads().isEmpty()) problems.add("It doesn't say what it reads (reads:).");
+        if (m.writes().isEmpty()) problems.add("It doesn't say what it writes (writes:), not even \"Nothing outside this machine\".");
+        if (m.dryRun() == null) warnings.add("It has no dry-run: a command that shows what it would do, saving and sending nothing.");
+        if (m.tab() == null) warnings.add("It has no tab: it can only be run from its settings.");
+        if (!Files.isRegularFile(folder.resolve("README.md"))) problems.add("It has no README.md.");
+        for (ElfRunner.Setting s : m.settings()) {
+            if (SECRET_KEY.matcher(s.key()).matches() && s.kind() != ElfRunner.Kind.SECRET) {
+                warnings.add(s.key() + " looks like a secret: give it kind: secret (the desk treats it as one anyway).");
+            }
+            if (s.kind() == ElfRunner.Kind.SECRET && s.dflt() != null && !s.dflt().isEmpty()) problems.add(s.key() + " is a secret with a default.");
+        }
+        for (Command c : m.commands().values()) {
+            if (c.label().equals(c.name())) warnings.add("The command " + c.name() + " has no label.");
+        }
+        for (Action a : m.actions().values()) {
+            if (a.label().equals(a.name())) warnings.add("The action " + a.name() + " has no label.");
+            for (Param p : a.params().values()) {
+                if (p.kind().equals("text") && p.pattern() == null) warnings.add(a.name() + "." + p.name() + " takes any text: give it a pattern if it can have one.");
+            }
+        }
+        // What a public repo mustn't carry.
+        String author = m.author() == null ? "" : m.author().toLowerCase(Locale.ROOT);
+        try (var files = Files.walk(folder)) {
+            for (Path f : files.filter(Files::isRegularFile).toList()) {
+                Path rel = folder.relativize(f);
+                if (rel.startsWith(".git") || rel.startsWith("target") || !TEXT_FILE.matcher(rel.getFileName().toString()).matches()) continue;
+                if (Files.size(f) > 2_000_000) {
+                    warnings.add(rel + " is big for an elf (" + Files.size(f) / 1000 + " KB).");
+                    continue;
+                }
+                String text = Files.readString(f, StandardCharsets.UTF_8);
+                Matcher leak = LEAK.matcher(text);
+                if (leak.find()) problems.add(rel + " has what looks like a token or key (" + leak.group().substring(0, 8) + "…).");
+                Matcher mail = EMAIL_IN_TEXT.matcher(text);
+                Set<String> found = new java.util.TreeSet<>();
+                while (mail.find()) {
+                    String e = mail.group().toLowerCase(Locale.ROOT);
+                    if (e.endsWith("@example.com") || e.endsWith("@example.org") || e.contains("noreply") || e.startsWith("git@") || e.endsWith(".local")
+                            || e.equals("notifications@github.com")
+                            || (!author.isEmpty() && e.startsWith(author + "@"))) continue;
+                    found.add(e);
+                }
+                if (!found.isEmpty()) warnings.add(rel + " has email addresses (" + String.join(", ", found) + "): make sure they may be public.");
+            }
+        } catch (IOException e) {
+            problems.add("Couldn't read its files: " + e.getMessage());
+        }
+
+        System.out.println(m.title() + " (" + m.name() + (m.version() == null ? "" : " " + m.version()) + ") reads as the desk will read it.");
+        System.out.println("  Settings: " + (m.settings().isEmpty() ? "none" : String.join(", ", m.settings().stream().map(ElfRunner.Setting::key).toList())));
+        System.out.println("  Commands: " + (m.commands().isEmpty() ? "none" : String.join(", ", m.commands().keySet())));
+        System.out.println("  Actions: " + (m.actions().isEmpty() ? "none" : String.join(", ", m.actions().keySet())));
+        if (m.refresh() != null) System.out.println("  Refresh: " + m.refresh().command() + (m.refresh().schedule() == null ? ", when you start it" : ", " + m.refresh().schedule()));
+        problems.forEach(p -> System.out.println("Problem: " + p));
+        warnings.forEach(w -> System.out.println("Warning: " + w));
+        if (!problems.isEmpty()) {
+            System.out.println("Fix the problems before you publish it.");
+            return 1;
+        }
+        return 0;
+    }
+
     // ---- what's installed ----
 
     /** The installed elves, by name. A folder whose elf.yaml doesn't read is left out (and logged). */
