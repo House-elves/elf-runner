@@ -603,10 +603,75 @@ class Elves {
         }
         String diff = git(i.dir(), "diff", "--no-color", "--no-ext-diff", i.commit(), commit);
         out.put("truncated", diff.length() > MAX_DIFF).put("diff", diff.length() > MAX_DIFF ? diff.substring(0, MAX_DIFF) : diff);
+        String next = changesFile(i.dir(), commit);
+        out.put("hasNotes", !next.isBlank());
+        var notes = out.putArray("notes");
+        newNotes(changesFile(i.dir(), i.commit()), next, i.manifest().version())
+                .forEach(n -> notes.addObject().put("title", n.title()).put("text", n.text()));
         return out;
     }
 
     static final int MAX_DIFF = 400_000;
+
+    /** A section of an elf's CHANGES.md: a {@code ## } heading (its version) and what it says, for the person using it. */
+    record Note(String title, String text) {
+    }
+
+    /** The elf's CHANGES.md at a commit, or nothing if it has none. */
+    static String changesFile(Path dir, String commit) {
+        try {
+            return git(dir, "show", commit + ":CHANGES.md");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * What's new since the installed version, newest first: the sections of the new CHANGES.md headed by a higher
+     * version than it ("## 1.3.0"), or, for a heading that isn't a version, one the installed CHANGES.md doesn't have.
+     */
+    static List<Note> newNotes(String installed, String next, String version) {
+        Set<String> seen = new java.util.HashSet<>();
+        sections(installed).forEach(n -> seen.add(n.title()));
+        int[] have = versionOf(version);
+        return sections(next).stream().filter(n -> {
+            int[] v = versionOf(n.title());
+            return v != null && have != null ? compare(v, have) > 0 : !seen.contains(n.title());
+        }).limit(20).toList();
+    }
+
+    static final Pattern VERSION_AT_START = Pattern.compile("^v?(\\d{1,9}(?:\\.\\d{1,9}){0,3})(?![\\w.])");
+
+    /** The version a heading or an elf.yaml starts with, like 1.3.0 of "1.3.0 (23 October 2026)", or null. */
+    static int[] versionOf(String s) {
+        Matcher m = s == null ? null : VERSION_AT_START.matcher(s.strip());
+        if (m == null || !m.find()) return null;
+        return java.util.Arrays.stream(m.group(1).split("\\.")).mapToInt(Integer::parseInt).toArray();
+    }
+
+    static int compare(int[] a, int[] b) {
+        for (int k = 0; k < Math.max(a.length, b.length); k++) {
+            int c = Integer.compare(k < a.length ? a[k] : 0, k < b.length ? b[k] : 0);
+            if (c != 0) return c;
+        }
+        return 0;
+    }
+
+    static List<Note> sections(String md) {
+        List<Note> out = new ArrayList<>();
+        String title = null;
+        StringBuilder text = new StringBuilder();
+        for (String line : (md + "\n## ").split("\n")) {
+            if (line.startsWith("## ")) {
+                if (title != null && !title.isEmpty()) out.add(new Note(clip(title, 100), clip(text.toString(), 4000)));
+                title = line.substring(3).strip();
+                text.setLength(0);
+            } else if (title != null) {
+                text.append(line).append('\n');
+            }
+        }
+        return out;
+    }
 
     /** Removes an elf's program. Its settings stay in its config file, for if you install it again. */
     synchronized void remove(String name) {
