@@ -507,11 +507,158 @@ class Elves {
 
     /** How to run an installed elf (jbang runs its main file), or, before it was installed here, its command on PATH. */
     List<String> command(String name) {
+        return command(name, false);
+    }
+
+    /** {@code record}: a background run, whose output only goes to its log, may record the elf's classes for its AOT cache. */
+    List<String> command(String name, boolean record) {
         Installed i = NAME.matcher(name).matches() ? installed().get(name) : null;
-        if (i != null) return List.of(jbang(), "--quiet", i.dir().resolve(i.manifest().main()).toString());
+        if (i != null) {
+            List<String> fast = launch(i, record);
+            return fast != null ? fast : List.of(jbang(), "--quiet", i.dir().resolve(i.manifest().main()).toString());
+        }
         Path onPath = ElfRunner.which(name);
         if (onPath == null) throw new IllegalStateException(name + " isn't installed: add it on the desk's Elves page");
         return List.of(onPath.toString());
+    }
+
+    // ---- starting an elf quickly ----
+    // jbang works out an elf's java, classpath and main class on every start, which costs about half a second, and a
+    // JVM loads its classes afresh each time. A click in an elf's tab is a start, so both add up. The runner asks
+    // jbang once per installed commit (launch/<name>-<commit>.json) and starts java itself, with an AOT cache of the
+    // elf's classes (JDK 25+, launch/<name>-<commit>.aot). The JVM prints a line on its output when it records one,
+    // and an action's answer is its output, so only a background run (a refresh, say) records, and the cache is made
+    // from that afterwards (assemble). Anything unusual: jbang as before.
+
+    /** The java command for an installed elf, or null to start it with jbang. */
+    List<String> launch(Installed i, boolean record) {
+        try {
+            Path dir = state.resolve("launch");
+            String id = i.manifest().name() + "-" + i.commit();
+            Path spec = dir.resolve(id + ".json");
+            JsonNode l = Files.isRegularFile(spec) ? ElfRunner.JSON.readTree(spec.toFile()) : null;
+            if (l == null || !runnable(l)) {
+                l = launchSpec(i);
+                if (l == null) return null;
+                Files.createDirectories(dir);
+                // Older commits' files go: an elf has one installed commit.
+                Pattern mine = Pattern.compile(Pattern.quote(i.manifest().name()) + "-[0-9a-f]{40}\\..*");
+                try (var old = Files.list(dir)) {
+                    old.filter(f -> mine.matcher(f.getFileName().toString()).matches()
+                            && !f.getFileName().toString().startsWith(id + ".")).forEach(f -> f.toFile().delete());
+                }
+                Path tmp = Files.createTempFile(dir, id, ".tmp");
+                Files.writeString(tmp, l.toString());
+                Files.move(tmp, spec, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            }
+            List<String> cmd = new ArrayList<>(List.of(l.path("java").asText()));
+            if (l.path("aot").asBoolean()) {
+                Path aot = dir.resolve(id + ".aot");
+                // Its AOT cache, which the JVM checks against the classpath (and ignores, saying nothing, if it
+                // doesn't match); or, for a background run and only one at a time, recording what it loads.
+                cmd.add("-Xlog:aot=off,cds=off");
+                if (Files.isRegularFile(aot)) cmd.add("-XX:AOTCache=" + aot);
+                else if (record && claim(dir.resolve(id + ".recording"))) {
+                    cmd.addAll(List.of("-XX:AOTMode=record", "-XX:AOTConfiguration=" + dir.resolve(id + ".aotconf")));
+                }
+            }
+            l.path("options").forEach(o -> cmd.add(o.asText()));
+            List<String> cp = new ArrayList<>();
+            l.path("classpath").forEach(c -> cp.add(c.asText()));
+            cmd.addAll(List.of("-cp", String.join(java.io.File.pathSeparator, cp), l.path("main").asText()));
+            return cmd;
+        } catch (Exception e) {
+            ElfRunner.log("Starting " + i.manifest().name() + " with jbang: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * After a run that recorded: the AOT cache made from its recording, in the background, then moved into place
+     * whole, so a start never reads half of one. If the run or this fails, the next run records again.
+     */
+    void assemble(Installed i, boolean ran) {
+        Path dir = state.resolve("launch");
+        String id = i.manifest().name() + "-" + i.commit();
+        Path conf = dir.resolve(id + ".aotconf"), made = dir.resolve(id + ".aot.new");
+        Thread.ofVirtual().start(() -> {
+            try {
+                JsonNode l = ElfRunner.JSON.readTree(dir.resolve(id + ".json").toFile());
+                // Updated while it ran: that commit's cache would never be used.
+                Installed now = installed().get(i.manifest().name());
+                if (ran && Files.isRegularFile(conf) && now != null && now.commit().equals(i.commit())) {
+                    List<String> cp = new ArrayList<>();
+                    l.path("classpath").forEach(c -> cp.add(c.asText()));
+                    List<String> cmd = new ArrayList<>(List.of(l.path("java").asText(), "-Xlog:aot=off,cds=off", "-XX:AOTMode=create",
+                            "-XX:AOTConfiguration=" + conf, "-XX:AOTCache=" + made));
+                    l.path("options").forEach(o -> cmd.add(o.asText()));
+                    cmd.addAll(List.of("-cp", String.join(java.io.File.pathSeparator, cp)));
+                    run(cmd, dir, Map.of(), 300);
+                    Files.move(made, dir.resolve(id + ".aot"), java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                    ElfRunner.log(i.manifest().name() + " starts faster now (its AOT cache is made)");
+                }
+            } catch (Exception e) {
+                ElfRunner.log("Couldn't make " + i.manifest().name() + "'s AOT cache: " + e.getMessage());
+            } finally {
+                try {
+                    Files.deleteIfExists(conf);
+                    Files.deleteIfExists(made);
+                    Files.deleteIfExists(dir.resolve(id + ".recording"));
+                } catch (IOException ignored) {
+                }
+            }
+        });
+    }
+
+    /** Its java and every jar on its classpath are still there (jbang's cache can be cleared). */
+    static boolean runnable(JsonNode l) {
+        if (!Files.isExecutable(Path.of(l.path("java").asText("/")))) return false;
+        for (JsonNode c : l.path("classpath")) if (!Files.exists(Path.of(c.asText()))) return false;
+        return l.path("classpath").size() > 0 && !l.path("main").asText("").isEmpty();
+    }
+
+    /** What jbang would run: built first, then its java, classpath, main class and runtime options. */
+    JsonNode launchSpec(Installed i) throws Exception {
+        Path main = i.dir().resolve(i.manifest().main());
+        run(List.of(jbang(), "build", "--quiet", main.toString()), ElfRunner.HOME, Map.of(), 600);
+        JsonNode info = ElfRunner.JSON.readTree(run(List.of(jbang(), "info", "tools", "--quiet", main.toString()), ElfRunner.HOME,
+                Map.of(), 120));
+        // A Java agent, a module path or a native build: jbang knows how; the runner doesn't try.
+        for (String f : List.of("javaAgents", "moduleName", "modularPath")) {
+            if (info.path(f).isArray() ? info.path(f).size() > 0 : !info.path(f).isMissingNode() && !info.path(f).isNull()) return null;
+        }
+        String jdk = info.path("availableJdkPath").asText("");
+        String jar = info.path("applicationJar").asText("");
+        String mainClass = info.path("mainClass").asText("");
+        if (jdk.isEmpty() || jar.isEmpty() || mainClass.isEmpty()) return null;
+        var l = ElfRunner.JSON.createObjectNode().put("java", Path.of(jdk, "bin", "java").toString()).put("main", mainClass)
+                .put("aot", feature(Path.of(jdk)) >= 25);
+        var cp = l.putArray("classpath").add(jar);
+        info.path("resolvedDependencies").forEach(cp::add);
+        var options = l.putArray("options");
+        info.path("runtimeOptions").forEach(options::add);
+        return runnable(l) ? l : null;
+    }
+
+    /** The JDK's feature version (25 of JAVA_VERSION="25.0.2" in its release file), or 0. */
+    static int feature(Path jdk) {
+        try {
+            Matcher m = Pattern.compile("(?m)^JAVA_VERSION=\"(\\d+)").matcher(Files.readString(jdk.resolve("release")));
+            return m.find() ? Integer.parseInt(m.group(1)) : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Creates {@code marker}, if no one has: true for the one caller that did. */
+    static boolean claim(Path marker) {
+        try {
+            Files.createFile(marker);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     static String jbang() {
@@ -815,7 +962,9 @@ class Elves {
     synchronized void start(String key, String elf, List<String> args) throws Exception {
         Process old = runs.get(key);
         if (old != null && old.isAlive()) throw new IllegalStateException("It's already running; wait for it to finish");
-        List<String> cmd = new ArrayList<>(command(elf));
+        List<String> cmd = new ArrayList<>(command(elf, true));
+        boolean recording = cmd.stream().anyMatch(c -> c.equals("-XX:AOTMode=record"));
+        Installed recorded = recording ? installed().get(elf) : null;
         cmd.addAll(args);
         Files.createDirectories(logs);
         Path log = logs.resolve(key + ".log");
@@ -832,6 +981,7 @@ class Elves {
                 }
             }
             ElfRunner.log(elf + " (" + key + ") " + (done.exitValue() == 0 ? "finished" : "failed with " + done.exitValue()));
+            if (recorded != null) assemble(recorded, done.exitValue() == 0);
             if (onChange != null) onChange.run();
         });
         ElfRunner.log("Started " + elf + " (" + key + ")");
