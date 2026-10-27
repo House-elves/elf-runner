@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -12,11 +13,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Agents for elves: an elf whose elf.yaml says {@code agents: true} may start one from an action, by answering with
- * {@code {"agent": {id, checkout, prompt, untrusted, schema, session, readOnly, web}}}. The runner runs it the way it runs the desk's
+ * {@code {"agent": {id, checkout, prompt, untrusted, schema, session, readOnly, web, images}}}. The runner runs it the way it runs the desk's
  * jobs (the safety check, the sandbox, a worktree of the item, or of a repo's default branch for kind REPO), and keeps what happens in the elf's {@code agents}
  * folder as {@code <id>.json}: its state, the lines so far, its answer, the agent's commits and session. Files the
  * agent leaves go next to it as {@code <id>--<name>}. The elf's tab reads them, and so does the elf (to post an answer).
@@ -27,6 +29,9 @@ class ElfAgents {
     static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,79}");
     static final int MAX_LINES = 400;
     static final int MAX_TEXT = 200_000;
+    /** Images an agent is shown with its prompt (screenshots you pasted): at most this many, each at most this big. */
+    static final int MAX_IMAGES = 4;
+    static final int MAX_IMAGE_BYTES = 3_750_000; // 5 MB once base64, Claude's limit for one image
 
     /** An elf's agent run: where it reports, and what it has said so far. */
     static final class Job {
@@ -93,7 +98,9 @@ class ElfAgents {
         // send out is then only what anyone may: a public repo, and nobody else's words. Nor an earlier session's:
         // what it read then (someone's words, another checkout) would go along. Checked before anything is started.
         boolean web = req.path("web").asBoolean(false);
+        ArrayNode images = images(req.path("images"));
         if (web) {
+            if (!images.isEmpty()) throw new IllegalArgumentException("An agent on the web isn't shown images");
             if (!req.path("readOnly").asBoolean(false) || !whole || !req.path("untrusted").asText("").isBlank()
                     || (req.path("session").isTextual() && !req.path("session").asText().isBlank())) {
                 throw new IllegalArgumentException("An agent on the web only reads, a repo, afresh, and no one else's text");
@@ -122,6 +129,7 @@ class ElfAgents {
         co.remove("web"); // the runner's own mark (a web agent's clone), never the elf's to set
         msg.set("checkout", co);
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
+        if (!images.isEmpty()) msg.set("images", images);
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
         if (req.path("readOnly").asBoolean(false)) msg.put("readOnly", true);
         if (web) {
@@ -140,6 +148,44 @@ class ElfAgents {
             }
         });
         return ElfRunner.JSON.createObjectNode().put("id", id).put("status", "queued");
+    }
+
+    /**
+     * The images an agent is shown with its prompt, checked: {type, data} with data base64, and the bytes really an
+     * image of that type (a PNG, JPEG, GIF or WebP), no bigger than Claude takes.
+     */
+    static ArrayNode images(JsonNode given) {
+        ArrayNode out = ElfRunner.JSON.createArrayNode();
+        if (given.isMissingNode() || given.isNull()) return out;
+        if (!given.isArray() || given.size() > MAX_IMAGES) throw new IllegalArgumentException("An agent is shown at most " + MAX_IMAGES + " images");
+        for (JsonNode i : given) {
+            String type = i.path("type").asText("");
+            byte[] bytes;
+            try {
+                bytes = Base64.getDecoder().decode(i.path("data").asText(""));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("An image's data is base64");
+            }
+            if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) throw new IllegalArgumentException("An image is at most 3.75 MB");
+            if (!type.equals(imageType(bytes))) throw new IllegalArgumentException("Not a PNG, JPEG, GIF or WebP image, or not the type it says");
+            out.addObject().put("type", type).put("data", Base64.getEncoder().encodeToString(bytes));
+        }
+        return out;
+    }
+
+    /** What the bytes are, by how they start: image/png, image/jpeg, image/gif, image/webp, or null. */
+    static String imageType(byte[] b) {
+        if (starts(b, 0, 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A)) return "image/png";
+        if (starts(b, 0, 0xFF, 0xD8, 0xFF)) return "image/jpeg";
+        if (starts(b, 0, 'G', 'I', 'F', '8')) return "image/gif";
+        if (starts(b, 0, 'R', 'I', 'F', 'F') && starts(b, 8, 'W', 'E', 'B', 'P')) return "image/webp";
+        return null;
+    }
+
+    static boolean starts(byte[] b, int at, int... magic) {
+        if (b.length < at + magic.length) return false;
+        for (int k = 0; k < magic.length; k++) if ((b[at + k] & 0xFF) != magic[k]) return false;
+        return true;
     }
 
     /** The repo is public: GitHub shows it to anyone (without a token, a private one is a 404). */
