@@ -110,6 +110,10 @@ each in an empty folder of its own, with the agent's own login. `elf-ask` reads 
 `--schema JSON`, `--system TEXT` and `--minutes N`, and answers as `claude -p --output-format json` does (`result`,
 `structured_output`, `total_cost_usd`, `is_error`), whichever agent it asked. Only Claude Code says what it cost.
 
-`elf-ask --check AGENT` tells the agent to run `cat` on a file holding a random word and fails if the word comes back:
-run it after installing or updating an agent. The agents that work on code (review, fix, Find out) still use Claude
+`elf-ask --check AGENT` tells the agent to run `cat` on a file holding a random word and fails if the word comes back.
+`elf-ask` fails closed: it asks an agent only after it passed that check at the version installed now (kept in
+`ask-checks.json` in the data folder; a new version is checked again first, so a flag it no longer knows or a tool
+it gained can't slip through). The agent also gets no GitHub or SSH credentials and none of the runner's `ELF_*`
+values. Codex's and pi's own lock-down is what's relied on: unlike the agents that work on code, they don't run in
+the runner's sandbox yet. The agents that work on code (review, fix, Find out) still use Claude
 Code.

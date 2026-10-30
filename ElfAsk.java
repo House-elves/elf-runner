@@ -35,6 +35,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  *   "structured_output" (with --schema), "total_cost_usd" (when the agent says), "agent"}; exit 1 and why on stderr
  * elf-ask --check [AGENT]                                    is it locked down? It's told to read a file and can't
  * </pre>
+ *
+ * <p>
+ * It fails closed: an agent is only asked once it has passed that check at the version installed (kept in
+ * ask-checks.json in the data folder, checked again when the version changes).
  */
 public class ElfAsk {
 
@@ -112,6 +116,12 @@ public class ElfAsk {
             throw new IllegalStateException(AGENTS.get(agent) + " isn't installed here (no " + command(agent)
                     + " on the PATH). Install it, or choose another coding agent in the elf's settings.");
         }
+        locked(agent);
+        return askUnchecked(agent, prompt, schema, system, minutes);
+    }
+
+    /** Asks without the lock-down check first: for the check itself. */
+    static Answer askUnchecked(String agent, String prompt, JsonNode schema, String system, int minutes) throws Exception {
         Path dir = Files.createTempDirectory("elf-ask-");
         try {
             return switch (agent) {
@@ -261,7 +271,7 @@ public class ElfAsk {
                     + "\nIf you can't run commands or read files, reply with exactly: NO-TOOLS";
             Answer a;
             try {
-                a = ask(agent, prompt, null, null, 2);
+                a = askUnchecked(agent, prompt, null, null, 2);
             } catch (IllegalStateException e) {
                 // No answer at all is no file read either.
                 if (!e.getMessage().contains("took longer")) throw e;
@@ -279,6 +289,50 @@ public class ElfAsk {
         return r;
     }
 
+    /**
+     * Fails closed: an agent is asked only once it passed {@link #check} at the version installed now. The result is
+     * kept per agent and version (ask-checks.json in the data folder), so a new version is checked again before an
+     * elf asks it: a flag it no longer knows, or a tool it gained, can't slip through.
+     */
+    static synchronized void locked(String agent) throws Exception {
+        String version = version(agent);
+        Path file = data().resolve("ask-checks.json");
+        ObjectNode checks = Files.isRegularFile(file) && JSON.readTree(file.toFile()) instanceof ObjectNode o ? o
+                : JSON.createObjectNode();
+        JsonNode seen = checks.path(agent);
+        if (seen.path("version").asText("").equals(version) && seen.path("ok").asBoolean()) return;
+        ObjectNode r = check(agent);
+        r.put("version", version).put("at", java.time.Instant.now().toString());
+        checks.set(agent, r);
+        Files.createDirectories(file.getParent());
+        Path tmp = file.resolveSibling(".ask-checks.json.tmp");
+        Files.writeString(tmp, checks.toPrettyString());
+        Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        if (!r.path("ok").asBoolean()) {
+            throw new IllegalStateException(AGENTS.get(agent) + " " + version + " didn't pass the lock-down check, so elves "
+                    + "won't ask it: " + r.path("why").asText("") + ". Choose another coding agent in the elf's settings.");
+        }
+    }
+
+    /** What {@code agent --version} says: a new one is checked again. */
+    static String version(String agent) throws Exception {
+        Path dir = Files.createTempDirectory("elf-ask-version-");
+        try {
+            Run r = run(List.of(command(agent), "--version"), dir, "", 1, AGENTS.get(agent));
+            String v = (r.out() + " " + r.err()).strip().replaceAll("\\s+", " ");
+            if (r.exit() != 0 || v.isEmpty()) throw new IllegalStateException(AGENTS.get(agent) + " didn't say its version");
+            return ElfRunner.clip(v, 80);
+        } finally {
+            delete(dir);
+        }
+    }
+
+    /** The House Elves data folder, as the runner finds it. */
+    static Path data() {
+        String d = System.getenv("HOUSE_ELVES_DATA");
+        return d != null && !d.isBlank() ? Path.of(d) : Path.of(System.getProperty("user.home"), ".local", "share", "house-elves");
+    }
+
     // ---- running one ----
 
     record Run(int exit, String out, String err) {
@@ -287,6 +341,7 @@ public class ElfAsk {
     /** The agent in its empty folder, the prompt on stdin, both outputs read while it runs. */
     static Run run(List<String> cmd, Path dir, String stdin, int minutes, String who) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile());
+        scrub(pb.environment());
         Process p = pb.start();
         CompletableFuture<String> out = CompletableFuture.supplyAsync(() -> read(p.getInputStream()));
         CompletableFuture<String> err = CompletableFuture.supplyAsync(() -> read(p.getErrorStream()));
@@ -300,6 +355,19 @@ public class ElfAsk {
             throw new IllegalStateException(who + " took longer than " + minutes + " minutes");
         }
         return new Run(p.exitValue(), out.get(10, TimeUnit.SECONDS), err.get(10, TimeUnit.SECONDS).strip());
+    }
+
+    /**
+     * Nothing it's not meant to have, in case a tool slips through after all: no GitHub or SSH credentials, and none
+     * of what the runner gave the elf (its tokens, files, push and pull credentials). The agent's own login stays.
+     */
+    static void scrub(Map<String, String> env) {
+        for (String k : List.of("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                "GITHUB_PERSONAL_ACCESS_TOKEN", "SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS", "RUNNER_TOKEN")) {
+            env.remove(k);
+        }
+        env.keySet().removeIf(k -> k.startsWith("ELF_"));
+        env.put("GIT_TERMINAL_PROMPT", "0");
     }
 
     static String read(InputStream in) {
