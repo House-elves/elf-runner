@@ -4,6 +4,7 @@
 //DEPS com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.2
 //SOURCES Elves.java
 //SOURCES ElfAgents.java
+//SOURCES ElfAsk.java
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -59,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.42.0"; // 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.43.0"; // 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -81,6 +82,10 @@ public class ElfRunner {
     }
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && args[0].equals("--ask")) {
+            // An elf asking a coding agent something (ELF_ASK, the bin/elf-ask this runner wrote): needs no config.
+            System.exit(ElfAsk.main(Arrays.copyOfRange(args, 1, args.length)));
+        }
         if (args.length > 0 && args[0].equals("--check-elf")) {
             // For whoever writes an elf: does its folder read as the desk will read it? Needs no install.
             System.exit(Elves.checkElf(Path.of(args.length > 1 ? args[1] : ".").toAbsolutePath().normalize()));
@@ -97,6 +102,7 @@ public class ElfRunner {
         if (cfg.sandbox) log("Agents run in " + (MAC ? "a macOS sandbox (sandbox-exec)" : "a bubblewrap sandbox")
                 + (cfg.sandboxPodman ? " with Podman" : ""));
         else log("WARNING: SANDBOX=none - agents can reach your GitHub credentials");
+        ASK = ElfAsk.writeLauncher(Config.DATA);
         ElfRunner runner = new ElfRunner(cfg);
         runner.migrateToItemClones();
         runner.checkLogin();
@@ -577,7 +583,7 @@ public class ElfRunner {
     // ---- the elves' config, for the desk's settings ----
 
     /** How a setting is checked before it's written. */
-    enum Kind { TEXT, LOGIN, EMAIL, EMAILS, WORDS, REPOS, HOST, INT, BOOL, CALENDAR, SECRET }
+    enum Kind { TEXT, LOGIN, EMAIL, EMAILS, WORDS, REPOS, HOST, INT, BOOL, CALENDAR, SECRET, AGENT }
 
     /**
      * One setting the desk may read and change. Nothing else in a config file is ever shown or written.
@@ -603,6 +609,9 @@ public class ElfRunner {
     static final ElfConfig RUNNER_CONFIG = new ElfConfig(Config.FILE, List.of(
             new Setting("MAX_JOBS", "Agents at a time", "More use more memory. Applies when the runner restarts.", Kind.INT, 1, 4),
             new Setting("JOB_TIMEOUT_MINUTES", "Stop an agent after (minutes)", "Applies when the runner restarts.", Kind.INT, 10, 240),
+            new Setting("ASK_AGENT", "Coding agent", "What elves ask to sum up, sort and suggest replies, unless an elf's "
+                    + "own settings choose another. It's given no tools. Agents that work on code still use Claude Code.",
+                    Kind.AGENT, 0, 0),
             new Setting("ELF_SOURCES", "Also list elves from", "GitHub accounts or orgs, or single repos (owner/name), "
                     + "comma-separated, such as a colleague's. Their repos tagged house-elf show on the + page; you still "
                     + "read each before you add it.", Kind.WORDS, 0, 0)));
@@ -624,6 +633,42 @@ public class ElfRunner {
             log("Couldn't read where elves may come from: " + e.getMessage());
         }
         return List.of();
+    }
+
+    /** bin/elf-ask, which every elf the runner starts is given as ELF_ASK. */
+    static Path ASK;
+
+    /** The coding agent elves ask unless their own settings say: ASK_AGENT in the runner's config, read fresh. */
+    static String runnerAgent() {
+        try {
+            String a = readConfig(Config.FILE).getOrDefault("ASK_AGENT", "").strip();
+            if (ElfAsk.AGENTS.containsKey(a)) return a;
+        } catch (IOException e) {
+            log("Couldn't read which coding agent elves ask: " + e.getMessage());
+        }
+        return ElfAsk.DEFAULT;
+    }
+
+    /**
+     * What an elf is started with to ask a coding agent: ELF_ASK (bin/elf-ask) and ELF_ASK_AGENT, its own settings'
+     * choice when it asks (ai: [ask] in its elf.yaml) and chose one, else the runner's.
+     */
+    static Map<String, String> askEnv(Elves elves, String name) {
+        Map<String, String> env = new java.util.HashMap<>();
+        if (ASK == null) return env;
+        String agent = runnerAgent();
+        try {
+            Elves.Installed i = Elves.NAME.matcher(name).matches() ? elves.installed().get(name) : null;
+            if (i != null && i.manifest().ai().contains("ask") && Files.isRegularFile(i.manifest().config())) {
+                String own = readConfig(i.manifest().config()).getOrDefault("ASK_AGENT", "").strip();
+                if (ElfAsk.AGENTS.containsKey(own)) agent = own;
+            }
+        } catch (Exception e) {
+            log("Couldn't read which coding agent " + name + " asks: " + e.getMessage());
+        }
+        env.put("ELF_ASK", ASK.toString());
+        env.put("ELF_ASK_AGENT", agent);
+        return env;
     }
 
     /** The settings the desk may show and change for an elf (or the runner itself). */
@@ -712,6 +757,16 @@ public class ElfRunner {
                     .put("kind", s.kind().name().toLowerCase(java.util.Locale.ROOT))
                     .put("needed", !s.optional() && s.dflt() == null);
             if (s.kind() == Kind.INT) n.put("min", s.min()).put("max", s.max());
+            if (s.kind() == Kind.AGENT) {
+                // An elf's can be left to the runner's; the runner's own is Claude Code until you choose.
+                var options = n.putArray("options");
+                if (!elf.equals("elf-runner")) {
+                    options.addObject().put("value", "").put("label", "Default (" + ElfAsk.AGENTS.get(runnerAgent()) + ")")
+                            .put("installed", ElfAsk.installed(runnerAgent()));
+                }
+                ElfAsk.AGENTS.forEach((k, label) -> options.addObject().put("value", k).put("label", label)
+                        .put("installed", ElfAsk.installed(k)));
+            }
             String v = values.getOrDefault(s.key(), "");
             if (s.kind() == Kind.SECRET) n.put("set", !v.isBlank());
             else n.put("value", v);
@@ -737,6 +792,7 @@ public class ElfRunner {
             case BOOL -> v.equals("true") || v.equals("false");
             case CALENDAR -> CALENDAR.matcher(v).matches() && Elves.Calendar.parse(v) != null;
             case SECRET -> v.length() >= 8 && v.length() <= 200 && v.chars().allMatch(c -> c >= 0x20 && c < 0x7f);
+            case AGENT -> v.isEmpty() || ElfAsk.AGENTS.containsKey(v);
         };
         if (ok) return null;
         return switch (s.kind()) {
@@ -748,6 +804,7 @@ public class ElfRunner {
             case LOGIN -> "Not a GitHub login";
             case HOST -> "Not a host name";
             case SECRET -> "8 to 200 printable characters";
+            case AGENT -> "One of " + String.join(", ", ElfAsk.AGENTS.keySet());
             default -> "Not a valid value";
         };
     }
@@ -1036,6 +1093,7 @@ public class ElfRunner {
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd).directory(HOME.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
             pb.environment().put("ELF_RUNNER_VERSION", VERSION); // what it may ask of this runner
+            pb.environment().putAll(askEnv(elves, name));
             Process p = pb.start();
             try (var in = p.getOutputStream()) {
                 if (stdin != null) in.write(stdin.getBytes(StandardCharsets.UTF_8));

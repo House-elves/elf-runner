@@ -100,7 +100,7 @@ class Elves {
     record Manifest(String name, String title, String description, String main, Path config, List<String> tools,
             List<ElfRunner.Setting> settings, Map<String, Command> commands, Refresh refresh, String dryRun,
             List<String> reads, List<String> writes, List<String> data, Tab tab, Map<String, Action> actions, boolean agents,
-            String agentDone, String version, String author) {
+            String agentDone, String version, String author, List<String> ai) {
 
         /** The folder in ~/.config/<name>/ that its UI may read. */
         Path data(String folder) {
@@ -265,9 +265,15 @@ class Elves {
             if (!TOOL.matcher(x.asText()).matches()) throw new IOException("elf.yaml: a tool is a command name");
             tools.add(x.asText());
         }
+        // What it asks of a coding agent: ask (prompt in, text out, through ELF_ASK) lets you choose which.
+        List<String> ai = new ArrayList<>();
+        for (JsonNode x : y.path("ai")) {
+            if (!x.asText().equals("ask")) throw new IOException("elf.yaml: ai lists what it asks of a coding agent: ask");
+            ai.add(x.asText());
+        }
         return new Manifest(name, title, clip(y.path("description").asText(""), 300), main, config, List.copyOf(tools),
                 List.copyOf(settings), commands, refresh, dryRun, lines(y.path("reads")), lines(y.path("writes")),
-                List.copyOf(data), tab, actions, agents, agentDone, version, author);
+                List.copyOf(data), tab, actions, agents, agentDone, version, author, List.copyOf(ai));
     }
 
     /** A command's or action's params. A command's are options, so each needs a pattern or a list to be one of. */
@@ -897,6 +903,11 @@ class Elves {
             if (known.containsKey(s.key())) with.addAll(known.get(s.key()));
             out.add(secret ? new ElfRunner.Setting(s.key(), s.label(), s.help(), ElfRunner.Kind.SECRET, 0, 0, s.dflt(), List.copyOf(with), s.optional()) : s);
         }
+        // An elf that asks a coding agent can choose which, or leave it to the runner's.
+        if (i.manifest().ai().contains("ask") && out.stream().noneMatch(s -> s.key().equals("ASK_AGENT"))) {
+            out.add(new ElfRunner.Setting("ASK_AGENT", "Coding agent", "What this elf asks to sum up, sort and suggest "
+                    + "replies. It's given no tools. Default is the runner's, in the desk's Settings.", ElfRunner.Kind.AGENT, 0, 0));
+        }
         return out;
     }
 
@@ -971,6 +982,7 @@ class Elves {
         Files.deleteIfExists(logs.resolve(key + ".failed"));
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(ElfRunner.HOME.toFile()).redirectErrorStream(true)
                 .redirectOutput(log.toFile()).redirectInput(ProcessBuilder.Redirect.from(Path.of("/dev/null").toFile()));
+        pb.environment().putAll(ElfRunner.askEnv(this, elf));
         Process p = pb.start();
         runs.put(key, p);
         p.onExit().thenAccept(done -> {

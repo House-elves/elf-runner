@@ -82,6 +82,7 @@ To try a change by hand: `jbang ElfRunner.java` (stop the service first). An old
 | `JOB_TIMEOUT_MINUTES` | `45` | |
 | `MODEL` | Claude Code's default | |
 | `TRIAGE_MODEL` | `claude-haiku-4-5-20251001` | For the safety check |
+| `ASK_AGENT` | `claude` | The coding agent elves ask (`claude`, `codex` or `pi`), unless an elf's own settings choose another. See below |
 | `MCP_CONFIG` | none | A Claude Code MCP config file for the agent (only these servers load) |
 | `SANDBOX` | `bwrap` (`sandbox-exec` on macOS) | `none` runs the agent unsandboxed, where it **can** reach your credentials |
 | `SANDBOX_PODMAN` | `false` | Podman socket in the sandbox (see above) |
@@ -90,3 +91,25 @@ To try a change by hand: `jbang ElfRunner.java` (stop the service first). An old
 | `GITHUB_USER` | required for posting | The `gh` account the desk's posts and closes go out as, e.g. `phillip-kruger`. Asked for by name, so your active `gh` account doesn't matter |
 
 Agent stderr goes to `WORK_DIR/agent-stderr.log`.
+
+## Asking a coding agent (ELF_ASK)
+
+Elves that sum up, sort or suggest replies (`ai: [ask]` in their `elf.yaml`) ask a coding agent through the runner:
+every elf it starts gets `ELF_ASK`, the path of `bin/elf-ask` in the data folder (the runner writes it when it
+starts), and `ELF_ASK_AGENT`, the agent to ask. That is the elf's own **Coding agent** setting, or `ASK_AGENT` from
+the runner's settings, or Claude Code. Each agent is asked with nothing it could act with, because what it reads
+includes other people's words:
+
+| Agent | Run as |
+|---|---|
+| Claude Code | `claude -p --model sonnet --tools "" --strict-mcp-config --setting-sources ""` |
+| Codex | `codex exec --ephemeral --skip-git-repo-check --ignore-user-config --ignore-rules --sandbox read-only`, with web search and its tool features (shell, apps, plugins, browser, images, hooks, …) switched off |
+| pi | `pi -p --no-tools --no-extensions --no-mcp --no-skills --no-prompt-templates --no-themes --no-context-files --no-session --no-approve` |
+
+each in an empty folder of its own, with the agent's own login. `elf-ask` reads the prompt on stdin, takes
+`--schema JSON`, `--system TEXT` and `--minutes N`, and answers as `claude -p --output-format json` does (`result`,
+`structured_output`, `total_cost_usd`, `is_error`), whichever agent it asked. Only Claude Code says what it cost.
+
+`elf-ask --check AGENT` tells the agent to run `cat` on a file holding a random word and fails if the word comes back:
+run it after installing or updating an agent. The agents that work on code (review, fix, Find out) still use Claude
+Code.
