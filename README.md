@@ -110,7 +110,7 @@ includes other people's words:
 
 each in an empty folder of its own, with the agent's own login. `elf-ask` reads the prompt on stdin, takes
 `--schema JSON`, `--system TEXT` and `--minutes N`, and answers as `claude -p --output-format json` does (`result`,
-`structured_output`, `total_cost_usd`, `is_error`), whichever agent it asked. Claude Code and IBM Bob say what it cost. Bob's licence is yours to accept (run `bob` once);
+`structured_output`, `total_cost_usd`, `is_error`), whichever agent it asked. Only Claude Code says what it cost in dollars (Bob counts in Bobcoins). Bob's licence is yours to accept (run `bob` once);
 `elf-ask` never accepts it for you.
 
 `elf-ask --check AGENT` tells the agent to run `cat` on a file holding a random word and fails if the word comes back.

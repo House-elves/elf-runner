@@ -218,7 +218,7 @@ public class ElfAsk {
     /**
      * IBM Bob (Bob Shell's headless run): ask mode, with every tool group off (reading and editing files, commands,
      * the web, MCP, skills, todos, subagents, switching mode), in an empty workspace. Its API key (BOB_API_KEY, and
-     * BOB_TEAM_ID for a general key) comes from the runner's settings and goes to Bob only. Says what it cost.
+     * BOB_TEAM_ID for a general key) comes from the runner's settings and goes to Bob only.
      */
     static Answer bob(Path dir, String prompt, JsonNode schema, String system, int minutes) throws Exception {
         Path work = Files.createDirectory(dir.resolve("work"));
@@ -247,8 +247,8 @@ public class ElfAsk {
         if (r.exit() != 0 || out == null || !"success".equals(out.path("status").asText()) || text.isEmpty()) {
             throw new IllegalStateException("IBM Bob failed: " + ElfRunner.clip(r.err().isBlank() ? r.out() : r.err(), 300));
         }
-        JsonNode cost = out.path("stats").path("session_costs");
-        return new Answer(text, schema == null ? null : parseJson(text, "IBM Bob"), cost.isNumber() ? cost.asDouble() : null);
+        // What it says it cost (stats.session_costs) is in Bobcoins, not dollars, so it isn't passed on as a cost.
+        return new Answer(text, schema == null ? null : parseJson(text, "IBM Bob"), null);
     }
 
     /** Bob Shell's tool groups: all off for an ask. */
