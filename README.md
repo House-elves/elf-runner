@@ -82,7 +82,8 @@ To try a change by hand: `jbang ElfRunner.java` (stop the service first). An old
 | `JOB_TIMEOUT_MINUTES` | `45` | |
 | `MODEL` | Claude Code's default | |
 | `TRIAGE_MODEL` | `claude-haiku-4-5-20251001` | For the safety check |
-| `ASK_AGENT` | `claude` | The coding agent elves ask (`claude`, `codex` or `pi`), unless an elf's own settings choose another. See below |
+| `ASK_AGENT` | `claude` | The coding agent elves ask (`claude`, `codex`, `pi` or `bob`), unless an elf's own settings choose another. See below |
+| `BOB_API_KEY` / `BOB_TEAM_ID` | none | IBM Bob's API key for headless runs (and the team ID a general key needs), only if elves ask Bob. Given to Bob alone |
 | `MCP_CONFIG` | none | A Claude Code MCP config file for the agent (only these servers load) |
 | `SANDBOX` | `bwrap` (`sandbox-exec` on macOS) | `none` runs the agent unsandboxed, where it **can** reach your credentials |
 | `SANDBOX_PODMAN` | `false` | Podman socket in the sandbox (see above) |
@@ -105,10 +106,12 @@ includes other people's words:
 | Claude Code | `claude -p --model sonnet --tools "" --strict-mcp-config --setting-sources ""` |
 | Codex | `codex exec --ephemeral --skip-git-repo-check --ignore-user-config --ignore-rules --sandbox read-only`, with web search and its tool features (shell, apps, plugins, browser, images, hooks, …) switched off |
 | pi | `pi -p --no-tools --no-extensions --no-mcp --no-skills --no-prompt-templates --no-themes --no-context-files --no-session --no-approve` |
+| IBM Bob | `bob run -f json --mode ask --disable-mcp --disable-subagents --disable-tool-groups read,edit,execute,browser,mcp,skill,todo,subagent,mode --max-turns 3`, with `BOB_API_KEY` from the runner's settings |
 
 each in an empty folder of its own, with the agent's own login. `elf-ask` reads the prompt on stdin, takes
 `--schema JSON`, `--system TEXT` and `--minutes N`, and answers as `claude -p --output-format json` does (`result`,
-`structured_output`, `total_cost_usd`, `is_error`), whichever agent it asked. Only Claude Code says what it cost.
+`structured_output`, `total_cost_usd`, `is_error`), whichever agent it asked. Claude Code and IBM Bob say what it cost. Bob's licence is yours to accept (run `bob` once);
+`elf-ask` never accepts it for you.
 
 `elf-ask --check AGENT` tells the agent to run `cat` on a file holding a random word and fails if the word comes back.
 `elf-ask` fails closed: it asks an agent only after it passed that check at the version installed now (kept in

@@ -50,6 +50,7 @@ public class ElfAsk {
         AGENTS.put("claude", "Claude Code");
         AGENTS.put("codex", "Codex");
         AGENTS.put("pi", "pi");
+        AGENTS.put("bob", "IBM Bob");
     }
 
     static final String DEFAULT = "claude";
@@ -128,6 +129,7 @@ public class ElfAsk {
                 case "claude" -> claude(dir, prompt, schema, system, minutes);
                 case "codex" -> codex(dir, prompt, schema, system, minutes);
                 case "pi" -> pi(dir, prompt, schema, system, minutes);
+                case "bob" -> bob(dir, prompt, schema, system, minutes);
                 default -> throw new IllegalStateException(agent);
             };
         } finally {
@@ -212,6 +214,45 @@ public class ElfAsk {
         }
         return new Answer(text, schema == null ? null : parseJson(text, "pi"), null);
     }
+
+    /**
+     * IBM Bob (Bob Shell's headless run): ask mode, with every tool group off (reading and editing files, commands,
+     * the web, MCP, skills, todos, subagents, switching mode), in an empty workspace. Its API key (BOB_API_KEY, and
+     * BOB_TEAM_ID for a general key) comes from the runner's settings and goes to Bob only. Says what it cost.
+     */
+    static Answer bob(Path dir, String prompt, JsonNode schema, String system, int minutes) throws Exception {
+        Path work = Files.createDirectory(dir.resolve("work"));
+        Map<String, String> runner = ElfRunner.readConfig(ElfRunner.Config.FILE);
+        String key = runner.getOrDefault("BOB_API_KEY", "").strip();
+        if (key.isEmpty()) throw new IllegalStateException("IBM Bob needs its API key: set it in the runner's settings");
+        List<String> cmd = new ArrayList<>(List.of(command("bob"), "run", "-f", "json", "-w", work.toString(), "--mode", "ask",
+                "--disable-mcp", "--disable-subagents", "--disable-tool-groups", String.join(",", BOB_OFF),
+                "--max-turns", "3", "--log-level", "error"));
+        String team = runner.getOrDefault("BOB_TEAM_ID", "").strip();
+        if (!team.isEmpty()) cmd.addAll(List.of("--team-id", team));
+        String p = withSystem(system, schema == null ? prompt : prompt + "\n\nAnswer with only one JSON object that "
+                + "matches this JSON Schema, with nothing before or after it:\n" + schema);
+        Run r = run(cmd, work, p, minutes, "IBM Bob", Map.of("BOB_API_KEY", key));
+        JsonNode out = null;
+        for (String line : r.out().split("\n")) {
+            if (line.startsWith("{")) {
+                try {
+                    out = JSON.readTree(line);
+                } catch (Exception ignored) {
+                    // not its answer
+                }
+            }
+        }
+        String text = out == null ? "" : out.path("last_message").asText("").strip();
+        if (r.exit() != 0 || out == null || !"success".equals(out.path("status").asText()) || text.isEmpty()) {
+            throw new IllegalStateException("IBM Bob failed: " + ElfRunner.clip(r.err().isBlank() ? r.out() : r.err(), 300));
+        }
+        JsonNode cost = out.path("stats").path("session_costs");
+        return new Answer(text, schema == null ? null : parseJson(text, "IBM Bob"), cost.isNumber() ? cost.asDouble() : null);
+    }
+
+    /** Bob Shell's tool groups: all off for an ask. */
+    static final List<String> BOB_OFF = List.of("read", "edit", "execute", "browser", "mcp", "skill", "todo", "subagent", "mode");
 
     /** An agent without a system prompt of its own: the instructions go first, marked as such. */
     static String withSystem(String system, String prompt) {
@@ -303,8 +344,12 @@ public class ElfAsk {
         Files.writeString(tmp, checks.toPrettyString());
         Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         if (!r.path("ok").asBoolean()) {
-            throw new IllegalStateException(AGENTS.get(agent) + " " + version + " didn't pass the lock-down check, so elves "
-                    + "won't ask it: " + r.path("why").asText("") + ". Choose another coding agent in the elf's settings.");
+            // It answered with the file's word, or it couldn't be asked at all (no login, say): either way, not yet.
+            throw new IllegalStateException(r.has("answer")
+                    ? AGENTS.get(agent) + " " + version + " failed the lock-down check, so elves won't ask it: "
+                            + r.path("why").asText("") + ". Choose another coding agent in the elf's settings."
+                    : "Couldn't check that " + AGENTS.get(agent) + " is locked down, so elves won't ask it yet: "
+                            + r.path("why").asText(""));
         }
     }
 
@@ -334,8 +379,14 @@ public class ElfAsk {
 
     /** The agent in its empty folder, the prompt on stdin, both outputs read while it runs. */
     static Run run(List<String> cmd, Path dir, String stdin, int minutes, String who) throws Exception {
+        return run(cmd, dir, stdin, minutes, who, Map.of());
+    }
+
+    /** @param env the agent's own login, given to it alone */
+    static Run run(List<String> cmd, Path dir, String stdin, int minutes, String who, Map<String, String> env) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile());
         scrub(pb.environment());
+        pb.environment().putAll(env);
         Process p = pb.start();
         CompletableFuture<String> out = CompletableFuture.supplyAsync(() -> read(p.getInputStream()));
         CompletableFuture<String> err = CompletableFuture.supplyAsync(() -> read(p.getErrorStream()));
@@ -357,7 +408,7 @@ public class ElfAsk {
      */
     static void scrub(Map<String, String> env) {
         for (String k : List.of("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
-                "GITHUB_PERSONAL_ACCESS_TOKEN", "SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS", "RUNNER_TOKEN")) {
+                "GITHUB_PERSONAL_ACCESS_TOKEN", "SSH_AUTH_SOCK", "GIT_ASKPASS", "SSH_ASKPASS", "RUNNER_TOKEN", "BOB_API_KEY")) {
             env.remove(k);
         }
         env.keySet().removeIf(k -> k.startsWith("ELF_"));
