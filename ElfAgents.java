@@ -81,10 +81,16 @@ class ElfAgents {
         JsonNode checkout = req.path("checkout");
         String repo = checkout.path("repo").asText("");
         boolean whole = checkout.path("kind").asText().equals("REPO");
-        if (!ElfRunner.REPO_NAME.matcher(repo).matches() || (whole ? checkout.path("number").asInt() != 0 : checkout.path("number").asInt() <= 0)
+        // WEB: no repo at all, an empty folder of its own: an agent that only reads the web (checks a site, looks
+        // something up), for steps you approved. The same rules as any agent on the web, below.
+        boolean none = checkout.path("kind").asText().equals("WEB");
+        if (none ? !repo.isEmpty() || checkout.path("number").asInt() != 0
+                : !ElfRunner.REPO_NAME.matcher(repo).matches() || (whole ? checkout.path("number").asInt() != 0 : checkout.path("number").asInt() <= 0)
                 || !List.of("PR", "ISSUE", "REPO").contains(checkout.path("kind").asText())) {
-            throw new IllegalArgumentException("An agent works on one PR or issue, or a repo: checkout {repo, number, kind} (REPO: number 0)");
+            throw new IllegalArgumentException("An agent works on one PR or issue, a repo, or only the web: checkout {repo, "
+                    + "number, kind} (REPO: number 0; WEB: no repo, number 0)");
         }
+        if (none && !req.path("web").asBoolean(false)) throw new IllegalArgumentException("An agent with no repo only reads the web (web)");
         String prompt = req.path("prompt").asText("");
         String schema = req.path("schema").asText("");
         if (prompt.isBlank() || prompt.length() > MAX_TEXT) throw new IllegalArgumentException("An agent needs a prompt");
@@ -101,11 +107,11 @@ class ElfAgents {
         ArrayNode images = images(req.path("images"));
         if (web) {
             if (!images.isEmpty()) throw new IllegalArgumentException("An agent on the web isn't shown images");
-            if (!req.path("readOnly").asBoolean(false) || !whole || !req.path("untrusted").asText("").isBlank()
+            if (!req.path("readOnly").asBoolean(false) || !(whole || none) || !req.path("untrusted").asText("").isBlank()
                     || (req.path("session").isTextual() && !req.path("session").asText().isBlank())) {
-                throw new IllegalArgumentException("An agent on the web only reads, a repo, afresh, and no one else's text");
+                throw new IllegalArgumentException("An agent on the web only reads, a repo or nothing, afresh, and no one else's text");
             }
-            if (!isPublic(repo)) throw new IllegalArgumentException("An agent on the web only reads a public repo");
+            if (!none && !isPublic(repo)) throw new IllegalArgumentException("An agent on the web only reads a public repo");
         }
         Path dir = m.data("agents");
         Files.createDirectories(dir);
