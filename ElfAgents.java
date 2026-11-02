@@ -104,6 +104,9 @@ class ElfAgents {
         // send out is then only what anyone may: a public repo, and nobody else's words. Nor an earlier session's:
         // what it read then (someone's words, another checkout) would go along. Checked before anything is started.
         boolean web = req.path("web").asBoolean(false);
+        String approved = req.path("approved").asText("");
+        if (!approved.isBlank() && !web) throw new IllegalArgumentException("Only an agent on the web takes approved text: others take untrusted");
+        if (approved.length() > MAX_TEXT) throw new IllegalArgumentException("Too much approved text");
         ArrayNode images = images(req.path("images"));
         if (web) {
             if (!images.isEmpty()) throw new IllegalArgumentException("An agent on the web isn't shown images");
@@ -138,9 +141,17 @@ class ElfAgents {
         if (!images.isEmpty()) msg.set("images", images);
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
         if (req.path("readOnly").asBoolean(false)) msg.put("readOnly", true);
+        // approved (web only): text you approved on your screen but that came from someone's words (steps written
+        // from an email, say). The runner puts it in the prompt itself, so what's screened as someone's words (with
+        // the strict check) is exactly what the agent gets.
         if (web) {
             msg.put("web", true);
             j.web = true;
+            if (!approved.isBlank()) {
+                prompt = prompt + "\n\n<approved>\n" + approved.replace("</", "<\\/") + "\n</approved>";
+                msg.put("prompt", prompt);
+                msg.put("approved", approved);
+            }
             // Its whole prompt and answer's shape go through the safety check: an elf that put someone's words there,
             // not in untrusted, still doesn't hand an injection to an agent that can reach the web.
             msg.put("untrusted", prompt + "\n\n" + schema);
