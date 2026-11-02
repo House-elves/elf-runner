@@ -144,6 +144,7 @@ class ElfAgents {
             // Its whole prompt and answer's shape go through the safety check: an elf that put someone's words there,
             // not in untrusted, still doesn't hand an injection to an agent that can reach the web.
             msg.put("untrusted", prompt + "\n\n" + schema);
+            msg.put("task", true);
         }
         Thread.ofVirtual().start(() -> {
             try {
