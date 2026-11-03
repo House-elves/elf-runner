@@ -60,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.45.4"; // 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.46.0"; // 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -247,6 +247,7 @@ public class ElfRunner {
                 case "elf.read" -> elfRead(msg);
                 case "elf.action" -> elfAction(msg);
                 case "elf.agentCancel" -> elfAgentCancel(msg);
+                case "elf.agentSlotRemove" -> elfAgentSlotRemove(msg);
                 case "house.update" -> houseUpdate(msg);
                 default -> { }
             }
@@ -313,7 +314,9 @@ public class ElfRunner {
             checkout = own;
         }
         // A new action starts from the PR's current head; a follow-up keeps the worktree as the agent left it.
-        boolean keep = msg.path("session").isTextual() && !checkout.path("reset").asBoolean() && !web;
+        // A slot (an elf's session) always keeps its clone: a turn that was stopped before it answered left work there.
+        boolean keep = (msg.path("session").isTextual() || !checkout.path("slot").asText("").isEmpty())
+                && !checkout.path("reset").asBoolean() && !web;
         // WEB (a web agent with no repo, see ElfAgents): an empty folder of its own, gone when it finishes.
         boolean none = checkout.path("kind").asText().equals("WEB");
         Path wt = none ? emptyDir(job) : worktree(job, checkout, keep);
@@ -336,8 +339,11 @@ public class ElfRunner {
     void runIn(long job, JsonNode msg, JsonNode checkout, Path wt, String startSha, JsonNode images, boolean keep) throws Exception {
         boolean web = msg.path("web").asBoolean(false);
 
+        // No schema (an elf's session): its last message is its reply, {reply: text}.
+        boolean plain = msg.path("schema").asText("").isBlank();
         List<String> cmd = new ArrayList<>(List.of(cfg.claude, "-p", "--output-format", "stream-json", "--verbose",
-                "--json-schema", msg.path("schema").asText(), "--strict-mcp-config"));
+                "--strict-mcp-config"));
+        if (!plain) cmd.addAll(List.of("--json-schema", msg.path("schema").asText()));
         // A read-only agent (an elf's, reading someone's private words) has only Read, Grep and Glob, and no MCP:
         // nothing it reads can leave but its answer, which you read. Claude Code's own permissions, not skipped
         // here, keep those to the checkout: anything outside it (the runner's Claude login, say) is refused.
@@ -350,7 +356,8 @@ public class ElfRunner {
         } else {
             cmd.addAll(List.of("--dangerously-skip-permissions", "--mcp-config", cfg.mcpConfig.toString()));
         }
-        cmd.addAll(List.of("--append-system-prompt", AGENT_RULES + timeRule(cfg.timeoutMinutes)));
+        cmd.addAll(List.of("--append-system-prompt", AGENT_RULES + (plain ? PLAIN_RULE : "") + timeRule(cfg.timeoutMinutes)
+                + goalRule(msg.path("goal").asText(""))));
         if (cfg.model != null) cmd.addAll(List.of("--model", cfg.model));
         if (msg.path("session").isTextual()) cmd.addAll(List.of("--resume", msg.path("session").asText()));
         // With images, the prompt goes as one message of Claude's, the images after its text.
@@ -392,7 +399,7 @@ public class ElfRunner {
                     continue;
                 }
                 if (n.path("type").asText().equals("result")) result = n;
-                else describe(n).forEach(t -> event(job, t));
+                else describe(n, plain ? MAX_PLAIN_LINE : 600).forEach(t -> event(job, t));
             }
             watchdog.interrupt();
         }
@@ -406,7 +413,8 @@ public class ElfRunner {
         }
         if (!running.containsKey(job)) return; // cancelled
         sendFiles(job, files);
-        if (result == null || result.path("is_error").asBoolean() || !result.path("structured_output").isObject()) {
+        if (result == null || result.path("is_error").asBoolean()
+                || (plain ? !result.path("result").isTextual() : !result.path("structured_output").isObject())) {
             String why = result == null && timedOut.get()
                     ? "It ran out of time: stopped after " + cfg.timeoutMinutes + " minutes (JOB_TIMEOUT_MINUTES) before it answered"
                     : result == null ? "Claude Code exited with code " + exit
@@ -416,7 +424,8 @@ public class ElfRunner {
             failed(job, why, result != null && result.path("total_cost_usd").isNumber() ? result.path("total_cost_usd").asDouble() : null);
             return;
         }
-        ObjectNode output = (ObjectNode) result.path("structured_output");
+        ObjectNode output = plain ? JSON.createObjectNode().put("reply", result.path("result").asText())
+                : (ObjectNode) result.path("structured_output");
         stripCanary(output);
         ObjectNode done = JSON.createObjectNode().put("type", "job.done").put("job", job)
                 .put("session", result.path("session_id").asText(null));
@@ -474,15 +483,39 @@ public class ElfRunner {
                 + "what you have, and the command the maintainer could run to find out more.";
     }
 
+    /** An elf's session (no schema): its last message is what the person reads. */
+    static final String PLAIN_RULE = " You are in a chat session with the person who runs this desk: answer them in "
+            + "your last message, in Markdown. Commit your work in the repo as you go (git commit); nothing you commit "
+            + "is pushed until they confirm it.";
+
+    /** How long a session's text lines may be: what it writes between tool calls is part of the chat. */
+    static final int MAX_PLAIN_LINE = 8000;
+
+    /**
+     * A session's original prompt (an elf's goal), given again each turn, so it outlives compaction. Context, not a
+     * new request.
+     */
+    static String goalRule(String goal) {
+        if (goal.isBlank()) return "";
+        return "\n\nThe session's goal, as the person first wrote it. It is standing context for every turn, not a new "
+                + "request; the latest message is what to do now:\n<session-goal>\n" + goal.replace("</", "<\\/")
+                + "\n</session-goal>";
+    }
+
     /** Short lines describing what the agent is doing, from one stream-json message. */
     static List<String> describe(JsonNode n) {
+        return describe(n, 600);
+    }
+
+    /** The same, with text lines up to {@code textMax} characters. */
+    static List<String> describe(JsonNode n, int textMax) {
         List<String> lines = new ArrayList<>();
         if (!n.path("type").asText().equals("assistant")) return lines;
         for (JsonNode c : n.path("message").path("content")) {
             switch (c.path("type").asText()) {
                 case "text" -> {
                     String t = c.path("text").asText().strip();
-                    if (!t.isEmpty()) lines.add(clip(t, 600));
+                    if (!t.isEmpty()) lines.add(clip(t, textMax));
                 }
                 case "tool_use" -> {
                     String name = c.path("name").asText();
@@ -1114,6 +1147,36 @@ public class ElfRunner {
         });
     }
 
+    /**
+     * Removes one of an elf's slots (a session it deleted): the slot's clone of the repo, its pushed-head lease, and
+     * Claude's sessions for it. Only the elf's own slots, and not while one of its agents works there.
+     */
+    void elfAgentSlotRemove(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            Elves.Installed i = elves.get(msg.path("elf").asText(""));
+            String repo = msg.path("repo").asText(""), slot = msg.path("slot").asText("");
+            if (!REPO_NAME.matcher(repo).matches() || !ElfAgents.SLOT.matcher(slot).matches()) {
+                throw new IllegalArgumentException("A slot to remove is {repo, slot}");
+            }
+            String full = i.manifest().name() + "_" + slot;
+            ReentrantLock lock = itemLocks.computeIfAbsent(repo + "#s-" + full, k -> new ReentrantLock());
+            if (!lock.tryLock()) throw new IllegalStateException("Its agent is working there; stop it first");
+            try {
+                Path wt = slotDir(repo, full);
+                boolean had = Files.exists(wt, LinkOption.NOFOLLOW_LINKS);
+                String sessions = wt.toString().replaceAll("[^A-Za-z0-9]", "-");
+                removeNoFollow(cfg.claudeConfigDir.resolve("projects").resolve(sessions));
+                removeNoFollow(cfg.workDir.resolve("claude-state").resolve(sessions + ".claude.json"));
+                removeNoFollow(headFile(wt));
+                removeNoFollow(wt);
+                log(i.manifest().name() + "'s slot " + slot + " on " + repo + " removed");
+                return JSON.createObjectNode().put("removed", had);
+            } finally {
+                lock.unlock();
+            }
+        });
+    }
+
     /** An elf with these arguments and stdin, waited for: its last output line, or its output as the error. */
     String runElf(String name, List<String> args, String stdin) throws Exception {
         List<String> cmd = new ArrayList<>(elves.command(name));
@@ -1493,7 +1556,10 @@ public class ElfRunner {
         if (!REPO_NAME.matcher(repo).matches() || (whole ? number != 0 : number <= 0)) throw new IllegalArgumentException("Bad item " + repo + "#" + number);
 
         boolean web = checkout.path("web").asBoolean(false);
-        Path wt = web ? webDir(repo) : itemDir(repo, number);
+        // slot (an elf's session, see ElfAgents): a clone of the repo of its own, kept between its turns.
+        String slot = checkout.path("slot").asText("");
+        if (!slot.isEmpty() && (!whole || web || !SLOT.matcher(slot).matches())) throw new IllegalArgumentException("Bad slot " + slot);
+        Path wt = web ? webDir(repo) : slot.isEmpty() ? itemDir(repo, number) : slotDir(repo, slot);
         if (web) {
             deleteTree(wt);
             if (Files.exists(wt, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Couldn't clear the web agent's clone " + wt);
@@ -1523,7 +1589,8 @@ public class ElfRunner {
 
     ReentrantLock itemLock(JsonNode checkout) {
         if (checkout.path("kind").asText().equals("WEB")) return new ReentrantLock(); // no item: nothing to share
-        return itemLocks.computeIfAbsent(checkout.path("repo").asText() + "#" + checkout.path("number").asInt(),
+        String slot = checkout.path("slot").asText("");
+        return itemLocks.computeIfAbsent(checkout.path("repo").asText() + "#" + (slot.isEmpty() ? checkout.path("number").asInt() : "s-" + slot),
                 k -> new ReentrantLock());
     }
 
@@ -1538,6 +1605,15 @@ public class ElfRunner {
 
     Path itemDir(String repo, int number) {
         return cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_" + number);
+    }
+
+    /** An elf's slot: {@code <elf>_<its own name>}, made by ElfAgents, so one elf never reaches another's. */
+    static final Pattern SLOT = Pattern.compile("[a-z0-9][a-z0-9-]{0,40}_[a-z0-9][a-z0-9-]{0,39}");
+
+    /** A slot's clone of a repo (an elf's session): worktrees/owner_repo_s-elf_name, kept between its turns. */
+    Path slotDir(String repo, String slot) {
+        if (!SLOT.matcher(slot).matches()) throw new IllegalArgumentException("Bad slot " + slot);
+        return cfg.workDir.resolve("worktrees").resolve(repo.replace('/', '_') + "_s-" + slot);
     }
 
     /** What a web agent may never fetch: names and addresses of this machine and its local network. */

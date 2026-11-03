@@ -27,7 +27,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 class ElfAgents {
 
     static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9-]{0,79}");
+    /** An elf's name for one of its slots (a session's own clone); the runner prefixes the elf's name. */
+    static final Pattern SLOT = Pattern.compile("[a-z0-9][a-z0-9-]{0,39}");
     static final int MAX_LINES = 400;
+    static final int MAX_LINE_CHARS = 600_000;
     static final int MAX_TEXT = 200_000;
     /** Images an agent is shown with its prompt (screenshots you pasted): at most this many, each at most this big. */
     static final int MAX_IMAGES = 4;
@@ -40,6 +43,8 @@ class ElfAgents {
         final Path dir;
         final ObjectNode state;
         long written;
+        /** The characters in its lines now. */
+        long chars;
         /** It could read the web: its session isn't handed back, so no later agent resumes what it read there. */
         boolean web;
 
@@ -91,14 +96,27 @@ class ElfAgents {
                     + "number, kind} (REPO: number 0; WEB: no repo, number 0)");
         }
         if (none && !req.path("web").asBoolean(false)) throw new IllegalArgumentException("An agent with no repo only reads the web (web)");
+        // slot (REPO only): a clone of the repo of the elf's own, kept between its agents, for a session that goes on
+        // over many turns. The runner names it after the elf too, so an elf only ever reaches its own.
+        String slot = checkout.path("slot").asText("");
+        if (!slot.isEmpty() && (!whole || !SLOT.matcher(slot).matches())) {
+            throw new IllegalArgumentException("A slot is lower case letters, digits and -, on a repo (kind REPO)");
+        }
         String prompt = req.path("prompt").asText("");
+        // No schema: the agent answers in plain text, its last message, as {reply}. For a session's chat.
         String schema = req.path("schema").asText("");
+        // goal: a session's original prompt, given again with every turn (in the system prompt), so it outlives
+        // compaction. The elf's own words, from you, like the prompt.
+        String goal = req.path("goal").asText("");
+        if (goal.length() > MAX_TEXT) throw new IllegalArgumentException("Too long a goal");
         if (prompt.isBlank() || prompt.length() > MAX_TEXT) throw new IllegalArgumentException("An agent needs a prompt");
         if (req.path("untrusted").asText("").length() > MAX_TEXT) throw new IllegalArgumentException("Too much text to check");
-        try {
-            if (!ElfRunner.JSON.readTree(schema).isObject()) throw new IllegalArgumentException();
-        } catch (Exception e) {
-            throw new IllegalArgumentException("An agent's schema is a JSON schema");
+        if (!schema.isBlank()) {
+            try {
+                if (!ElfRunner.JSON.readTree(schema).isObject()) throw new IllegalArgumentException();
+            } catch (Exception e) {
+                throw new IllegalArgumentException("An agent's schema is a JSON schema");
+            }
         }
         // web: it may also search and read the web (an elf working out how to do something new). What it can read and
         // send out is then only what anyone may: a public repo, and nobody else's words. Nor an earlier session's:
@@ -111,7 +129,8 @@ class ElfAgents {
         if (web) {
             if (!images.isEmpty()) throw new IllegalArgumentException("An agent on the web isn't shown images");
             if (!req.path("readOnly").asBoolean(false) || !(whole || none) || !req.path("untrusted").asText("").isBlank()
-                    || (req.path("session").isTextual() && !req.path("session").asText().isBlank())) {
+                    || (req.path("session").isTextual() && !req.path("session").asText().isBlank())
+                    || !slot.isEmpty() || !goal.isBlank() || schema.isBlank()) {
                 throw new IllegalArgumentException("An agent on the web only reads, a repo or nothing, afresh, and no one else's text");
             }
             if (!none && !isPublic(repo)) throw new IllegalArgumentException("An agent on the web only reads a public repo");
@@ -136,7 +155,10 @@ class ElfAgents {
                 .put("untrusted", req.path("untrusted").asText("")).put("schema", schema);
         ObjectNode co = checkout.deepCopy();
         co.remove("web"); // the runner's own mark (a web agent's clone), never the elf's to set
+        co.remove("slot");
+        if (!slot.isEmpty()) co.put("slot", m.name() + "_" + slot);
         msg.set("checkout", co);
+        if (!goal.isBlank()) msg.put("goal", goal);
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
         if (!images.isEmpty()) msg.set("images", images);
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
@@ -253,7 +275,9 @@ class ElfAgents {
             if (j.state.path("status").asText().equals("queued")) j.state.put("status", "running").put("started", Instant.now().toString());
             var lines = j.state.withArray("lines");
             lines.add(text);
-            while (lines.size() > MAX_LINES) lines.remove(0);
+            j.chars += text.length();
+            // At most MAX_LINES, and few enough characters that the tab can read the report (the desk reads 1.5 MB).
+            while (lines.size() > MAX_LINES || (j.chars > MAX_LINE_CHARS && lines.size() > 1)) j.chars -= lines.remove(0).asText().length();
         }
         write(j, false);
     }
