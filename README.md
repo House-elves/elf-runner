@@ -52,6 +52,8 @@ It installs and runs elves for the desk (its + page, and each elf's settings). A
   sandbox, with no credentials in its environment, and gives up after 10 minutes. An agent setting's options say,
   for each agent that isn't installed, the command Install would run (`install`) and what's left for you after it
   (`after`: its login or licence), or that npm is missing (`installNeeds`).
+- An elf's agent may be shown PDFs with its prompt, in `images` as `{"type": "application/pdf", "data": …}` (up to
+  10 MB, counted with the images' four): Claude reads it whole, as a document, and so does the safety check.
 - An agent's answer says, besides its cost, the model it ran as (`model`), how long it took (`durationMs`) and how
   full its context is (`context: {used, window}`: its last message's input, cached and written tokens and output,
   against the model's context window). IBM Bob says how long it took.

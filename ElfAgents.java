@@ -35,6 +35,8 @@ class ElfAgents {
     /** Images an agent is shown with its prompt (screenshots you pasted): at most this many, each at most this big. */
     static final int MAX_IMAGES = 4;
     static final int MAX_IMAGE_BYTES = 3_750_000; // 5 MB once base64, Claude's limit for one image
+    /** A PDF shown with the prompt, one of the images' four. */
+    static final int MAX_PDF_BYTES = 10_000_000;
 
     /** An elf's agent run: where it reports, and what it has said so far. */
     static final class Job {
@@ -214,6 +216,13 @@ class ElfAgents {
                 bytes = Base64.getDecoder().decode(i.path("data").asText(""));
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("An image's data is base64");
+            }
+            // A PDF (runner 0.50.0): Claude reads it whole, its text and its pictures, as a document with the prompt.
+            if (type.equals("application/pdf")) {
+                if (bytes.length == 0 || bytes.length > MAX_PDF_BYTES) throw new IllegalArgumentException("A PDF is at most 10 MB");
+                if (!starts(bytes, 0, '%', 'P', 'D', 'F', '-')) throw new IllegalArgumentException("Not a PDF, or not the type it says");
+                out.addObject().put("type", type).put("data", Base64.getEncoder().encodeToString(bytes));
+                continue;
             }
             if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) throw new IllegalArgumentException("An image is at most 3.75 MB");
             if (!type.equals(imageType(bytes))) throw new IllegalArgumentException("Not a PNG, JPEG, GIF or WebP image, or not the type it says");
