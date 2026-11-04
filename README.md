@@ -46,6 +46,12 @@ It installs and runs elves for the desk (its + page, and each elf's settings). A
   Before Bob works on a session at a version, the runner runs it once in the sandbox and tells it to read a file
   outside; it must fail (kept per version in `agent-checks.json`). What it says it cost is in Bobcoins
   (`bobcoins`), never a dollar cost.
+- Installing a coding agent: `agent.install {agent}`, which the desk sends only after you confirm it, runs that
+  agent's own npm package and nothing else (`@anthropic-ai/claude-code`, `@openai/codex`,
+  `@mariozechner/pi-coding-agent`, `@ibm/bob`) as `npm install -g --prefix ~/.local <package>`, as you, outside the
+  sandbox, with no credentials in its environment, and gives up after 10 minutes. An agent setting's options say,
+  for each agent that isn't installed, the command Install would run (`install`) and what's left for you after it
+  (`after`: its login or licence), or that npm is missing (`installNeeds`).
 - First refresh: once every setting an elf can't run without has a value (no default, not `optional`), the runner starts its refresh by itself: when it's installed with its settings already there, or when the desk saves the last one. Only the first time: not once that refresh ran, nor for an elf with files in its `data` folders already. `elves.list` says which settings are still `missing`.
 
 It also pushes the agent's commits when you confirm a push in the desk (`git.push`). It pushes the PR's worktree HEAD to exactly the branch the desk names. The worktree must be at the commit you saw, that commit must descend from the branch's head when the agent started, and the push is plain fast-forward, so if the branch moved on GitHub nothing is pushed. The token reaches git through a credential helper for that one command. The agent only commits locally (`git commit`); it never pushes. The token is read fresh for each write, and never stored, logged, or passed to the agent.

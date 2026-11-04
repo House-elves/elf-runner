@@ -59,6 +59,29 @@ public class ElfAsk {
     record Answer(String text, JsonNode json, Double cost) {
     }
 
+    /**
+     * Each agent's own npm package, which the desk's Install button installs (agent.install): only these, and only
+     * into ~/.local (npm's global prefix is often a system folder you can't write to).
+     */
+    static final Map<String, String> PACKAGES = Map.of("claude", "@anthropic-ai/claude-code", "codex", "@openai/codex",
+            "pi", "@mariozechner/pi-coding-agent", "bob", "@ibm/bob");
+
+    /** What Install runs, as words for the confirm: npm install -g --prefix ~/.local <package>. */
+    static String installText(String agent) {
+        return "npm install -g --prefix ~/.local " + PACKAGES.get(agent);
+    }
+
+    /** What you still do yourself once it's installed: its login, its licence. */
+    static String afterInstall(String agent) {
+        return switch (agent) {
+            case "claude" -> "Log the runner in: run claude setup-token and put the token in the runner's settings (house-elves doctor says where).";
+            case "codex" -> "Run codex once in a terminal to sign in.";
+            case "pi" -> "Run pi once in a terminal to choose its model provider and set its key.";
+            case "bob" -> "Run bob once in a terminal to accept its licence, and set IBM Bob's API key in the runner's settings.";
+            default -> "";
+        };
+    }
+
     /** The command an agent's CLI is, on PATH: claude, codex, pi. */
     static String command(String agent) {
         return agent;

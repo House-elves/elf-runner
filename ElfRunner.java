@@ -60,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.47.1"; // 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.48.0"; // 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -248,6 +248,7 @@ public class ElfRunner {
                 case "elf.action" -> elfAction(msg);
                 case "elf.agentCancel" -> elfAgentCancel(msg);
                 case "elf.agentSlotRemove" -> elfAgentSlotRemove(msg);
+                case "agent.install" -> agentInstall(msg);
                 case "house.update" -> houseUpdate(msg);
                 default -> { }
             }
@@ -1134,8 +1135,15 @@ public class ElfRunner {
                     options.addObject().put("value", "").put("label", "Default (" + ElfAsk.AGENTS.get(runnerAgent()) + ")")
                             .put("installed", ElfAsk.installed(runnerAgent()));
                 }
-                ElfAsk.AGENTS.forEach((k, label) -> options.addObject().put("value", k).put("label", label)
-                        .put("installed", ElfAsk.installed(k)));
+                boolean npm = which("npm") != null;
+                ElfAsk.AGENTS.forEach((k, label) -> {
+                    ObjectNode o = options.addObject().put("value", k).put("label", label).put("installed", ElfAsk.installed(k));
+                    // Not installed: what Install would run (agent.install), and what's left for you after it.
+                    if (!ElfAsk.installed(k) && ElfAsk.PACKAGES.containsKey(k)) {
+                        if (npm) o.put("install", ElfAsk.installText(k)).put("after", ElfAsk.afterInstall(k));
+                        else o.put("installNeeds", "Install Node.js (with npm) to install " + label + " from the desk");
+                    }
+                });
             }
             String v = values.getOrDefault(s.key(), "");
             if (s.kind() == Kind.SECRET) n.put("set", !v.isBlank());
@@ -1461,6 +1469,50 @@ public class ElfRunner {
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * Installs a coding agent you don't have, when you confirm it in the desk: only its own npm package
+     * (ElfAsk.PACKAGES), into ~/.local, as you and outside the sandbox (it's that vendor's software), with none of the
+     * runner's or GitHub's credentials in its environment. Its login and licence stay yours to do: the answer says how.
+     */
+    void agentInstall(JsonNode msg) {
+        Thread.ofVirtual().start(() -> elvesAnswer(msg, () -> installAgent(msg.path("agent").asText(""))));
+    }
+
+    synchronized ObjectNode installAgent(String agent) throws Exception {
+        String pkg = ElfAsk.PACKAGES.get(agent);
+        if (pkg == null) throw new IllegalArgumentException("Not a coding agent the desk installs: " + agent);
+        String label = ElfAsk.AGENTS.get(agent);
+        if (ElfAsk.installed(agent)) throw new IllegalStateException(label + " is installed already");
+        Path npm = which("npm");
+        if (npm == null) throw new IllegalStateException("Install Node.js (with npm) first: the desk installs " + label + " with npm");
+        Path out = Files.createTempFile("agent-install-", ".log");
+        try {
+            log("Installing " + label + ": " + ElfAsk.installText(agent));
+            ProcessBuilder pb = new ProcessBuilder(npm.toString(), "install", "-g", "--prefix", HOME.resolve(".local").toString(), pkg)
+                    .directory(HOME.toFile()).redirectErrorStream(true).redirectOutput(out.toFile());
+            scrub(pb.environment());
+            pb.environment().remove("BOB_API_KEY");
+            pb.environment().remove("CLAUDE_CODE_OAUTH_TOKEN");
+            Process p = pb.start();
+            if (!p.waitFor(10, TimeUnit.MINUTES)) {
+                kill(p);
+                throw new IllegalStateException("Installing " + label + " took over 10 minutes, so it was stopped");
+            }
+            String log = Files.readString(out);
+            if (p.exitValue() != 0) {
+                throw new IllegalStateException("npm couldn't install " + label + ": " + clip(log.strip().replaceAll("\\s+", " "), 600));
+            }
+        } finally {
+            Files.deleteIfExists(out);
+        }
+        boolean found = ElfAsk.installed(agent);
+        log(label + (found ? " installed" : " installed in ~/.local/bin, but not on the runner's PATH"));
+        ObjectNode r = JSON.createObjectNode().put("agent", agent).put("label", label).put("installed", found);
+        r.put("next", found ? ElfAsk.afterInstall(agent)
+                : "It's in ~/.local/bin, which isn't on the runner's PATH: add it to your PATH and run house-elves install again.");
+        return r;
     }
 
     /**
