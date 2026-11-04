@@ -60,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.46.1"; // 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.47.0"; // 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -341,6 +341,12 @@ public class ElfRunner {
 
         // No schema (an elf's session): its last message is its reply, {reply: text}.
         boolean plain = msg.path("schema").asText("").isBlank();
+        // IBM Bob instead of Claude Code (an elf's session that picked it, see ElfAgents): its own command, login and
+        // events; everything around it (the sandbox, the clone, the answer) is the same.
+        if (msg.path("agent").asText("").equals("bob")) {
+            runBob(job, msg, checkout, wt, startSha);
+            return;
+        }
         List<String> cmd = new ArrayList<>(List.of(cfg.claude, "-p", "--output-format", "stream-json", "--verbose",
                 "--strict-mcp-config"));
         if (!plain) cmd.addAll(List.of("--json-schema", msg.path("schema").asText()));
@@ -441,6 +447,275 @@ public class ElfRunner {
             send(done);
         }
         log("Job " + job + " done");
+    }
+
+    // ---- IBM Bob, for an elf's session ----
+
+    /**
+     * One turn of a session with IBM Bob (Bob Shell's headless run), in the same sandbox and clone as Claude Code
+     * would have. It has no system prompt of its own, so the runner's rules and the session's goal go before the
+     * message. Its tools run without asking (the sandbox is the boundary, as for Claude Code). It keeps its tasks in
+     * ~/.bob, so each clone gets a .bob of its own that lasts between turns (bob-homes/), and a turn resumes the last
+     * one's task by id. Its API key comes from the runner's settings and is in its environment, as Claude Code's
+     * token is in Claude's.
+     */
+    void runBob(long job, JsonNode msg, JsonNode checkout, Path wt, String startSha) throws Exception {
+        Map<String, String> runnerCfg = readConfig(Config.FILE);
+        String key = runnerCfg.getOrDefault("BOB_API_KEY", "").strip();
+        if (key.isEmpty()) throw new IllegalStateException("IBM Bob needs its API key: set it in the runner's settings");
+        Bob bob = Bob.find();
+        checkBob(bob, key, runnerCfg);
+        String prompt = "<instructions>\n" + AGENT_RULES + PLAIN_RULE + timeRule(cfg.timeoutMinutes) + goalRule(msg.path("goal").asText(""))
+                + "\n</instructions>\n\n" + msg.path("prompt").asText();
+        List<String> cmd = bob.command(wt, runnerCfg);
+        String session = msg.path("session").asText("");
+        if (session.matches("[0-9a-f]{16,64}")) cmd.addAll(List.of("--resume", session));
+        Path files = cfg.workDir.resolve("files").resolve(String.valueOf(job));
+        deleteTree(files);
+        Files.createDirectories(files);
+        event(job, "Starting IBM Bob in " + wt);
+        ElfAgents.Job elfJob = agents.byJob(job);
+        if (elfJob != null && elfJob.cancelled()) return;
+        Process p = agentProcess(cmd, wt, files, bob.extra(this, wt, key)).start();
+        running.put(job, p);
+        if (elfJob != null && elfJob.cancelled()) kill(p);
+        try (OutputStream in = p.getOutputStream()) {
+            in.write(prompt.getBytes(StandardCharsets.UTF_8));
+        }
+        BobStream stream = new BobStream(prompt);
+        AtomicBoolean timedOut = new AtomicBoolean();
+        try (BufferedReader out = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+            Thread watchdog = Thread.ofVirtual().start(() -> {
+                try {
+                    if (!p.waitFor(cfg.timeoutMinutes, TimeUnit.MINUTES)) {
+                        event(job, "Timed out after " + cfg.timeoutMinutes + " minutes; stopping.");
+                        timedOut.set(true);
+                        kill(p);
+                    }
+                } catch (InterruptedException ignored) {
+                }
+            });
+            String line;
+            while ((line = out.readLine()) != null) {
+                JsonNode n;
+                try {
+                    n = JSON.readTree(line);
+                } catch (Exception e) {
+                    continue;
+                }
+                stream.accept(n).forEach(t -> event(job, t));
+            }
+            watchdog.interrupt();
+        }
+        int exit = p.waitFor();
+        if (startSha != null) {
+            sanitizeItem(checkout.path("repo").asText(), wt);
+            fetchFromCache(wt, cacheDir(checkout.path("repo").asText()), 0);
+        }
+        if (!running.containsKey(job)) return; // cancelled
+        sendFiles(job, files);
+        String reply = stream.reply();
+        if (stream.result == null || !"success".equals(stream.result.path("status").asText()) || reply.isBlank()) {
+            failed(job, stream.result == null && timedOut.get()
+                    ? "It ran out of time: stopped after " + cfg.timeoutMinutes + " minutes (JOB_TIMEOUT_MINUTES) before it answered"
+                    : stream.result == null ? "IBM Bob exited with code " + exit + " (its errors are in the runner's agent-stderr.log)"
+                    : "IBM Bob didn't finish: " + stream.result.path("status").asText("no answer"));
+            return;
+        }
+        ObjectNode output = JSON.createObjectNode().put("reply", reply);
+        stripCanary(output);
+        ObjectNode done = JSON.createObjectNode().put("type", "job.done").put("job", job)
+                .put("session", stream.result.path("stats").path("task_id").asText(null));
+        done.set("output", output);
+        if (startSha != null) done.set("git", issueCommits(wt));
+        // What it says it cost is in Bobcoins, not dollars: kept as that, never as a cost.
+        if (stream.result.path("stats").path("session_costs").isNumber()) {
+            done.put("bobcoins", stream.result.path("stats").path("session_costs").asDouble());
+        }
+        if (elfJob != null) agents.done(elfJob, done);
+        else send(done);
+        log("Job " + job + " done (IBM Bob)");
+    }
+
+    /**
+     * Bob's stream-json, as lines for the desk and its reply. A resumed task replays what came before, so only what
+     * follows this turn's own message counts: its tool calls, and the text of its messages, joined into the reply.
+     */
+    static final class BobStream {
+        final String sent;
+        boolean ours;
+        final StringBuilder reply = new StringBuilder();
+        StringBuilder said = new StringBuilder();
+        JsonNode result;
+
+        BobStream(String sent) {
+            this.sent = sent.strip();
+        }
+
+        List<String> accept(JsonNode n) {
+            List<String> lines = new ArrayList<>();
+            switch (n.path("type").asText()) {
+                case "message" -> {
+                    String text = n.path("content").asText("");
+                    if (n.path("role").asText().equals("user")) {
+                        // A replayed message is an earlier turn's; ours is the one we sent. If it never matches (Bob
+                        // changed how it echoes), the last one counts, as the result comes in.
+                        if (text.strip().equals(sent)) ours = true;
+                        reply.setLength(0);
+                        said.setLength(0);
+                    } else if (n.path("role").asText().equals("assistant")) {
+                        reply.append(text);
+                        if (ours) said.append(text);
+                    }
+                }
+                case "tool_use" -> {
+                    if (!ours) return lines;
+                    flush(lines);
+                    JsonNode in = n.path("parameters");
+                    String detail = in.path("command").asText(in.path("path").asText(in.path("file_path").asText(
+                            in.path("pattern").asText(in.path("url").asText(in.path("query").asText(""))))));
+                    lines.add("\u25b8 " + n.path("tool_name").asText("tool") + (detail.isEmpty() ? "" : ": " + clip(detail.replace('\n', ' '), 160)));
+                }
+                case "tool_result" -> {
+                    // A new message after a tool: what it said before is a line of its own.
+                }
+                case "result" -> {
+                    result = n;
+                    if (ours) flush(lines);
+                }
+                default -> { }
+            }
+            return lines;
+        }
+
+        /** What it said since its last tool call, as one line (its messages come in pieces). */
+        void flush(List<String> lines) {
+            String t = said.toString().strip();
+            if (!t.isEmpty()) lines.add(clip(t, MAX_PLAIN_LINE));
+            said.setLength(0);
+        }
+
+        String reply() {
+            return reply.toString().strip();
+        }
+    }
+
+    /** IBM Bob as installed: its package (dist/bob.js and its node_modules) and the node that runs it. */
+    record Bob(Path pkg, Path node, String version) {
+
+        static Bob find() {
+            Path bin = which("bob");
+            if (bin == null) throw new IllegalStateException("IBM Bob isn't installed here (no bob on the PATH)");
+            try {
+                Path js = bin.toRealPath();
+                if (!js.endsWith(Path.of("dist", "bob.js"))) throw new IllegalStateException("bob isn't Bob Shell's dist/bob.js: " + js);
+                Path node = which("node");
+                if (node == null) throw new IllegalStateException("IBM Bob needs node on the PATH");
+                Path pkg = js.getParent().getParent();
+                String version = ElfAsk.version("bob");
+                return new Bob(pkg, node.toRealPath(), version == null ? "unknown" : version);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            } catch (IllegalStateException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IllegalStateException("Couldn't tell which IBM Bob is installed: " + e.getMessage());
+            }
+        }
+
+        List<String> command(Path wt, Map<String, String> runnerCfg) {
+            List<String> cmd = new ArrayList<>(List.of(node.toString(), pkg.resolve("dist").resolve("bob.js").toString(), "run",
+                    "-f", "stream-json", "-w", wt.toString(), "--trust", "--disable-mcp", "--log-level", "error"));
+            String team = runnerCfg.getOrDefault("BOB_TEAM_ID", "").strip();
+            if (team.matches("[A-Za-z0-9-]{1,100}")) cmd.addAll(List.of("--team-id", team));
+            return cmd;
+        }
+
+        /**
+         * What the sandbox adds for it: its package and node, read-only; a ~/.bob of this clone's own (its tasks, kept
+         * so a turn can resume the last), with your Bob settings copied in (not your login: the key is in its
+         * environment); and its API key.
+         */
+        Extra extra(ElfRunner r, Path wt, String key) throws IOException {
+            Path home = r.bobHome(wt);
+            Path settings = Files.createDirectories(home.resolve("settings"));
+            Path mine = HOME.resolve(".bob").resolve("settings").resolve("settings.json");
+            if (Files.isRegularFile(mine, LinkOption.NOFOLLOW_LINKS)) replace(settings.resolve("settings.json"), Files.readString(mine));
+            List<Path> read = new ArrayList<>(List.of(pkg));
+            if (!node.startsWith("/usr")) read.add(node.getParent().getParent());
+            return new Extra(read, Map.of(home, ".bob"), Map.of("BOB_API_KEY", key, "BOB_LOG_LEVEL", "error"));
+        }
+    }
+
+    /** A clone's own ~/.bob for IBM Bob, kept between its turns (removed with its slot). */
+    Path bobHome(Path wt) throws IOException {
+        return Files.createDirectories(cfg.workDir.resolve("bob-homes").resolve(java.util.HexFormat.of()
+                .formatHex(sha256(wt.toString()), 0, 12)));
+    }
+
+    /**
+     * Fails closed, as elf-ask does: before IBM Bob works on a session at a version, it's run once in the sandbox
+     * and told to read a file outside it. It must not be able to. Kept per version in agent-checks.json.
+     */
+    synchronized void checkBob(Bob bob, String key, Map<String, String> runnerCfg) throws Exception {
+        Path checks = cfg.workDir.resolve("agent-checks.json");
+        ObjectNode known = Files.isRegularFile(checks) ? (ObjectNode) JSON.readTree(checks.toFile()) : JSON.createObjectNode();
+        if (known.path("bob").asText().equals(bob.version())) return;
+        log("Checking IBM Bob " + bob.version() + " in the sandbox…");
+        Path secretDir = Files.createDirectories(cfg.workDir.resolve("checks"));
+        byte[] b = new byte[12];
+        new java.security.SecureRandom().nextBytes(b);
+        String word = java.util.HexFormat.of().formatHex(b);
+        Path secret = secretDir.resolve("secret-" + word.substring(0, 6) + ".txt");
+        Path dir = cfg.workDir.resolve("worktrees").resolve("_check_bob");
+        deleteTree(dir);
+        Files.createDirectories(dir);
+        try {
+            Files.writeString(secret, word + "\n");
+            List<String> cmd = bob.command(dir, runnerCfg);
+            cmd.addAll(List.of("--max-turns", "4"));
+            Process p = agentProcess(cmd, dir, null, bob.extra(this, dir, key)).start();
+            try (OutputStream in = p.getOutputStream()) {
+                in.write(("Run this shell command and reply with only its output: cat " + secret
+                        + "\nIf you can't run it or read the file, reply with exactly: NO-ACCESS").getBytes(StandardCharsets.UTF_8));
+            }
+            String out;
+            Path tmp = Files.createTempFile(cfg.workDir.resolve("tmp"), "bob-check", ".out");
+            try (var is = p.getInputStream()) {
+                Thread copy = Thread.ofVirtual().start(() -> {
+                    try {
+                        Files.copy(is, tmp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException ignored) {
+                    }
+                });
+                if (!p.waitFor(5, TimeUnit.MINUTES)) {
+                    kill(p);
+                    throw new IllegalStateException("IBM Bob's sandbox check didn't finish in 5 minutes, so it isn't used");
+                }
+                copy.join(10_000);
+                out = Files.readString(tmp);
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
+            if (out.contains(word)) {
+                throw new IllegalStateException("IBM Bob read a file outside the sandbox in its check, so sessions don't use it");
+            }
+            if (!out.contains("\"type\":\"result\"")) {
+                throw new IllegalStateException("IBM Bob's sandbox check didn't answer (is its API key right?), so it isn't used yet");
+            }
+            known.put("bob", bob.version());
+            Files.writeString(checks, known.toString());
+            log("IBM Bob " + bob.version() + " passed its sandbox check");
+        } finally {
+            Files.deleteIfExists(secret);
+            deleteTree(dir);
+            removeNoFollow(bobHome(dir));
+        }
+    }
+
+    /** What the sandbox shows one agent besides the usual: folders to read, folders under its home, environment. */
+    record Extra(List<Path> read, Map<Path, String> home, Map<String, String> env) {
+        static final Extra NONE = new Extra(List.of(), Map.of(), Map.of());
     }
 
     /** The runner's Claude has its own config dir, so "Not logged in" needs a specific instruction. */
@@ -1176,6 +1451,7 @@ public class ElfRunner {
                 removeNoFollow(cfg.claudeConfigDir.resolve("projects").resolve(sessions));
                 removeNoFollow(cfg.workDir.resolve("claude-state").resolve(sessions + ".claude.json"));
                 removeNoFollow(headFile(wt));
+                removeNoFollow(cfg.workDir.resolve("bob-homes").resolve(java.util.HexFormat.of().formatHex(sha256(wt.toString()), 0, 12)));
                 removeNoFollow(wt);
                 try (var left = Files.list(wt.getParent())) {
                     if (left.findAny().isEmpty()) Files.delete(wt.getParent());
@@ -2362,8 +2638,13 @@ public class ElfRunner {
 
     /** With {@code files}: the job's own directory for files for the maintainer, as $ELF_FILES. */
     ProcessBuilder agentProcess(List<String> cmd, Path dir, Path files) {
-        List<String> full = cfg.sandbox ? Sandbox.wrap(cfg, cmd, dir, files) : cmd;
+        return agentProcess(cmd, dir, files, Extra.NONE);
+    }
+
+    ProcessBuilder agentProcess(List<String> cmd, Path dir, Path files, Extra extra) {
+        List<String> full = cfg.sandbox ? Sandbox.wrap(cfg, cmd, dir, files, extra) : cmd;
         ProcessBuilder pb = new ProcessBuilder(full).directory(dir.toFile());
+        if (!cfg.sandbox) pb.environment().putAll(extra.env());
         if (!cfg.sandbox && files != null) pb.environment().put("ELF_FILES", files.toString());
         pb.redirectError(ProcessBuilder.Redirect.appendTo(cfg.workDir.resolve("agent-stderr.log").toFile()));
         scrub(pb.environment());
@@ -2558,7 +2839,11 @@ public class ElfRunner {
         }
 
         static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files) {
-            if (MAC) return MacSandbox.wrap(cfg, cmd, cwd, files);
+            return wrap(cfg, cmd, cwd, files, Extra.NONE);
+        }
+
+        static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files, Extra extra) {
+            if (MAC) return MacSandbox.wrap(cfg, cmd, cwd, files, extra);
             String home = System.getProperty("user.home");
             String runtime = System.getenv().getOrDefault("XDG_RUNTIME_DIR", "/run/user/" + uid());
             Path w = cfg.workDir;
@@ -2591,6 +2876,9 @@ public class ElfRunner {
             }
             // The JDK and Maven the runner found (see Config.prepare), wherever they're installed.
             for (Path tool : cfg.toolHomes()) b.addAll(List.of("--ro-bind", tool.toString(), tool.toString()));
+            // An agent's own extras (IBM Bob's package, and its ~/.bob of this clone).
+            for (Path r : extra.read()) b.addAll(List.of("--ro-bind", r.toString(), r.toString()));
+            extra.home().forEach((from, name) -> b.addAll(List.of("--bind", from.toString(), home + "/" + name)));
             b.addAll(claudeIsolation(cfg, cwd));
             b.addAll(List.of("--clearenv",
                     "--setenv", "HOME", home,
@@ -2612,6 +2900,7 @@ public class ElfRunner {
                     "--chdir", cwd.toString()));
             // After --clearenv: these setenvs would be wiped before it.
             if (cfg.claudeToken != null) b.addAll(List.of("--setenv", "CLAUDE_CODE_OAUTH_TOKEN", cfg.claudeToken));
+            extra.env().forEach((k, v) -> b.addAll(List.of("--setenv", k, v)));
             if (cfg.sandboxPodman) {
                 String sock = "unix://" + runtime + "/podman/podman.sock";
                 // DOCKER_HOST for Testcontainers / Quarkus Dev Services; CONTAINER_HOST makes the podman CLI talk
@@ -2648,7 +2937,7 @@ public class ElfRunner {
      */
     static class MacSandbox {
 
-        static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files) {
+        static List<String> wrap(Config cfg, List<String> cmd, Path cwd, Path files, Extra extra) {
             Path w = cfg.workDir;
             try {
                 String sessions = Sandbox.sessionsName(cfg, cwd);
@@ -2666,7 +2955,13 @@ public class ElfRunner {
                     write.add(cwd);
                 }
                 if (files != null) write.add(files);
+                // An agent's own extras: a folder under its home is a link to one it may write.
+                for (var e : extra.home().entrySet()) {
+                    Files.createSymbolicLink(home.resolve(e.getValue()), e.getKey());
+                    write.add(e.getKey());
+                }
                 List<Path> read = new ArrayList<>(cfg.toolHomes());
+                read.addAll(extra.read());
                 read.add(Path.of(cfg.claude).getParent());
                 read.addAll(List.of(w.resolve("cache"), w.resolve("gitconfig"), w.resolve("gh-empty"), cfg.mcpConfig));
                 List<String> b = new ArrayList<>(List.of("/usr/bin/sandbox-exec", "-p", profile(read, write), "/usr/bin/env", "-i",
@@ -2690,6 +2985,7 @@ public class ElfRunner {
                         "GIT_SSH_COMMAND=false"));
                 if (files != null) b.add("ELF_FILES=" + files);
                 if (cfg.claudeToken != null) b.add("CLAUDE_CODE_OAUTH_TOKEN=" + cfg.claudeToken);
+                extra.env().forEach((k, v) -> b.add(k + "=" + v));
                 b.addAll(cmd);
                 return b;
             } catch (IOException e) {

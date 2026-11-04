@@ -37,6 +37,15 @@ It installs and runs elves for the desk (its + page, and each elf's settings). A
   `elf.agentSlotRemove {elf, repo, slot}` deletes a slot's clone and Claude's sessions for it, only that elf's own,
   and not while an agent works there. An agent's report keeps at most 600,000 characters of lines, so its tab can
   read it.
+- IBM Bob for a session: `agent: "bob"` (only with a slot, no schema, no one else's text and no images) runs Bob
+  Shell's headless `bob run -f stream-json` instead of Claude Code, in the same sandbox and slot. Its package and node
+  are mounted read-only; each slot gets a `~/.bob` of its own (`bob-homes/`, removed with the slot) holding its tasks,
+  so a turn resumes the last one's task (`--resume <task id>`), with your Bob settings (not your login) copied in.
+  Its API key (`BOB_API_KEY`, and `BOB_TEAM_ID`) comes from the runner's settings and is in its environment, as
+  Claude Code's token is in Claude's. Bob has no system prompt, so the rules and the goal go before the message.
+  Before Bob works on a session at a version, the runner runs it once in the sandbox and tells it to read a file
+  outside; it must fail (kept per version in `agent-checks.json`). What it says it cost is in Bobcoins
+  (`bobcoins`), never a dollar cost.
 - First refresh: once every setting an elf can't run without has a value (no default, not `optional`), the runner starts its refresh by itself: when it's installed with its settings already there, or when the desk saves the last one. Only the first time: not once that refresh ran, nor for an elf with files in its `data` folders already. `elves.list` says which settings are still `missing`.
 
 It also pushes the agent's commits when you confirm a push in the desk (`git.push`). It pushes the PR's worktree HEAD to exactly the branch the desk names. The worktree must be at the commit you saw, that commit must descend from the branch's head when the agent started, and the push is plain fast-forward, so if the branch moved on GitHub nothing is pushed. The token reaches git through a credential helper for that one command. The agent only commits locally (`git commit`); it never pushes. The token is read fresh for each write, and never stored, logged, or passed to the agent.

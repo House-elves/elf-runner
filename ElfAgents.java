@@ -109,6 +109,10 @@ class ElfAgents {
         // compaction. The elf's own words, from you, like the prompt.
         String goal = req.path("goal").asText("");
         if (goal.length() > MAX_TEXT) throw new IllegalArgumentException("Too long a goal");
+        // agent: which coding agent works on it. Claude Code unless it says IBM Bob, which only works on a session
+        // (a slot, a plain answer, no one else's text, no images): the safety check and read-only tools are Claude's.
+        String agent = req.path("agent").asText("claude");
+        if (!List.of("claude", "bob").contains(agent)) throw new IllegalArgumentException("An agent is claude or bob");
         if (prompt.isBlank() || prompt.length() > MAX_TEXT) throw new IllegalArgumentException("An agent needs a prompt");
         if (req.path("untrusted").asText("").length() > MAX_TEXT) throw new IllegalArgumentException("Too much text to check");
         if (!schema.isBlank()) {
@@ -126,6 +130,10 @@ class ElfAgents {
         if (!approved.isBlank() && !web) throw new IllegalArgumentException("Only an agent on the web takes approved text: others take untrusted");
         if (approved.length() > MAX_TEXT) throw new IllegalArgumentException("Too much approved text");
         ArrayNode images = images(req.path("images"));
+        if (agent.equals("bob") && (slot.isEmpty() || !schema.isBlank() || req.path("readOnly").asBoolean(false)
+                || req.path("web").asBoolean(false) || !req.path("untrusted").asText("").isBlank() || !images.isEmpty())) {
+            throw new IllegalArgumentException("IBM Bob only works on a session: a slot, no schema, no one else's text, no images");
+        }
         if (web) {
             if (!images.isEmpty()) throw new IllegalArgumentException("An agent on the web isn't shown images");
             if (!req.path("readOnly").asBoolean(false) || !(whole || none) || !req.path("untrusted").asText("").isBlank()
@@ -159,6 +167,7 @@ class ElfAgents {
         if (!slot.isEmpty()) co.put("slot", m.name() + "_" + slot);
         msg.set("checkout", co);
         if (!goal.isBlank()) msg.put("goal", goal);
+        if (agent.equals("bob")) msg.put("agent", "bob");
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
         if (!images.isEmpty()) msg.set("images", images);
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
@@ -308,6 +317,7 @@ class ElfAgents {
             if (done.path("session").isTextual() && !j.web) j.state.put("session", done.path("session").asText());
             if (done.has("git")) j.state.set("git", done.path("git"));
             if (done.has("cost")) j.state.set("cost", done.path("cost"));
+            if (done.has("bobcoins")) j.state.set("bobcoins", done.path("bobcoins"));
         }
         write(j, true);
     }
