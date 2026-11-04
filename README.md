@@ -52,6 +52,9 @@ It installs and runs elves for the desk (its + page, and each elf's settings). A
   sandbox, with no credentials in its environment, and gives up after 10 minutes. An agent setting's options say,
   for each agent that isn't installed, the command Install would run (`install`) and what's left for you after it
   (`after`: its login or licence), or that npm is missing (`installNeeds`).
+- An agent's answer says, besides its cost, the model it ran as (`model`), how long it took (`durationMs`) and how
+  full its context is (`context: {used, window}`: its last message's input, cached and written tokens and output,
+  against the model's context window). IBM Bob says how long it took.
 - First refresh: once every setting an elf can't run without has a value (no default, not `optional`), the runner starts its refresh by itself: when it's installed with its settings already there, or when the desk saves the last one. Only the first time: not once that refresh ran, nor for an elf with files in its `data` folders already. `elves.list` says which settings are still `missing`.
 
 It also pushes the agent's commits when you confirm a push in the desk (`git.push`). It pushes the PR's worktree HEAD to exactly the branch the desk names. The worktree must be at the commit you saw, that commit must descend from the branch's head when the agent started, and the push is plain fast-forward, so if the branch moved on GitHub nothing is pushed. The token reaches git through a credential helper for that one command. The agent only commits locally (`git commit`); it never pushes. The token is read fresh for each write, and never stored, logged, or passed to the agent.

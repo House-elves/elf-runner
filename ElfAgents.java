@@ -318,6 +318,7 @@ class ElfAgents {
             if (done.has("git")) j.state.set("git", done.path("git"));
             if (done.has("cost")) j.state.set("cost", done.path("cost"));
             if (done.has("bobcoins")) j.state.set("bobcoins", done.path("bobcoins"));
+            for (String k : List.of("model", "durationMs", "context")) if (done.has(k)) j.state.set(k, done.path(k));
         }
         write(j, true);
     }
