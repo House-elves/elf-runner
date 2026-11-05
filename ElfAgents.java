@@ -378,7 +378,8 @@ class ElfAgents {
 
     /**
      * When one of its agents has ended (done, failed or stopped): the elf's agents.done action, with {id}, so the
-     * elf can take the answer in (a thread's reply, a draft). Then its tab hears "agents" again.
+     * elf can take the answer in (a thread's reply, a draft). It may answer with the next agent to start, as its other
+     * actions can (a message you sent while this one worked). Then its tab hears "agents" again.
      */
     void ended(Job j) {
         try {
@@ -386,7 +387,14 @@ class ElfAgents {
             String action = i.manifest().agentDone();
             if (action == null) return;
             Elves.Action a = i.manifest().actions().get(action);
-            runner.runElf(j.elf, a.args(), ElfRunner.JSON.createObjectNode().put("id", j.id).toString());
+            String last = runner.runElf(j.elf, a.args(), ElfRunner.JSON.createObjectNode().put("id", j.id).toString());
+            JsonNode answer;
+            try {
+                answer = ElfRunner.JSON.readTree(last);
+            } catch (Exception e) {
+                answer = null;
+            }
+            if (answer instanceof ObjectNode o && o.path("agent").isObject()) request(i, o.path("agent"));
             runner.send(ElfRunner.JSON.createObjectNode().put("type", "elf.changed").put("elf", j.elf).put("what", "agents"));
         } catch (Exception e) {
             ElfRunner.log(j.elf + " couldn't take in its agent " + j.id + ": " + ElfRunner.rootMessage(e));
