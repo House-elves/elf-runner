@@ -60,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.52.0"; // 0.52.0: an elf may push its session's commits (push with slot), from that session's own clone, 0.51.0: an elf's agents.done action may answer with the next agent to start (a message queued while one worked), 0.50.0: an elf's agent may be shown PDFs with its prompt (images: application/pdf), read whole by Claude, 0.49.0: 0.49.0: an agent's answer says its model, how long it took and how full its context is, 0.48.0: 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.53.0"; // 0.53.0: an elf's session may give its agent variables (env), for the commands it runs, not for the agent itself, 0.52.0: an elf may push its session's commits (push with slot), from that session's own clone, 0.51.0: an elf's agents.done action may answer with the next agent to start (a message queued while one worked), 0.50.0: an elf's agent may be shown PDFs with its prompt (images: application/pdf), read whole by Claude, 0.49.0: 0.49.0: an agent's answer says its model, how long it took and how full its context is, 0.48.0: 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -325,6 +325,7 @@ public class ElfRunner {
             runIn(job, msg, checkout, wt, none ? null : gitOut(wt, "rev-parse", "HEAD"), images, keep);
         } finally {
             if (none) deleteTree(wt);
+            deleteTree(envDir(job));
         }
     }
 
@@ -376,7 +377,7 @@ public class ElfRunner {
         event(job, "Starting Claude Code in " + wt);
         ElfAgents.Job elfJob = agents.byJob(job);
         if (elfJob != null && elfJob.cancelled()) return; // stopped before Claude started
-        Process p = agentProcess(cmd, wt, files).start();
+        Process p = agentProcess(cmd, wt, files, envExtra(job, msg)).start();
         running.put(job, p);
         if (elfJob != null && elfJob.cancelled()) kill(p); // stopped while it started
         try (OutputStream in = p.getOutputStream()) {
@@ -487,7 +488,7 @@ public class ElfRunner {
         event(job, "Starting IBM Bob in " + wt);
         ElfAgents.Job elfJob = agents.byJob(job);
         if (elfJob != null && elfJob.cancelled()) return;
-        Process p = agentProcess(cmd, wt, files, bob.extra(this, wt, key)).start();
+        Process p = agentProcess(cmd, wt, files, bob.extra(this, wt, key).and(envExtra(job, msg))).start();
         running.put(job, p);
         if (elfJob != null && elfJob.cancelled()) kill(p);
         try (OutputStream in = p.getOutputStream()) {
@@ -760,6 +761,43 @@ public class ElfRunner {
     /** What the sandbox shows one agent besides the usual: folders to read, folders under its home, environment. */
     record Extra(List<Path> read, Map<Path, String> home, Map<String, String> env) {
         static final Extra NONE = new Extra(List.of(), Map.of(), Map.of());
+
+        Extra and(Extra o) {
+            List<Path> r = new ArrayList<>(read);
+            r.addAll(o.read);
+            Map<Path, String> h = new HashMap<>(home);
+            h.putAll(o.home);
+            Map<String, String> e = new HashMap<>(env);
+            e.putAll(o.env);
+            return new Extra(r, h, e);
+        }
+    }
+
+    /** Where a job's variables are, while it runs. */
+    Path envDir(long job) {
+        return cfg.workDir.resolve("agent-env").resolve(String.valueOf(job));
+    }
+
+    /**
+     * A session's variables (env, checked by ElfAgents), for the commands its agent runs: in a file only you can read,
+     * shown read-only in the sandbox, that Claude Code sources before each shell command (CLAUDE_ENV_FILE) and that
+     * SESSION_ENV_FILE names for an agent to source itself. Never in the agent's own environment, so a key like
+     * ANTHROPIC_API_KEY is for what it builds, not what it runs as. Removed when the job ends.
+     */
+    Extra envExtra(long job, JsonNode msg) throws IOException {
+        if (!msg.path("env").isObject() || msg.path("env").isEmpty()) return Extra.NONE;
+        Path dir = envDir(job);
+        deleteTree(dir);
+        Files.createDirectories(dir.getParent());
+        Files.createDirectory(dir, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")));
+        StringBuilder b = new StringBuilder();
+        msg.path("env").properties().forEach(e -> b.append("export ").append(e.getKey()).append("='")
+                .append(e.getValue().asText().replace("'", "'\\''")).append("'\n"));
+        Path file = dir.resolve("env");
+        Files.writeString(Files.createFile(file, java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"))), b);
+        return new Extra(List.of(dir), Map.of(), Map.of("CLAUDE_ENV_FILE", file.toString(), "SESSION_ENV_FILE", file.toString()));
     }
 
     /**

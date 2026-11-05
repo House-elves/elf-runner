@@ -132,6 +132,7 @@ class ElfAgents {
         if (!approved.isBlank() && !web) throw new IllegalArgumentException("Only an agent on the web takes approved text: others take untrusted");
         if (approved.length() > MAX_TEXT) throw new IllegalArgumentException("Too much approved text");
         ArrayNode images = images(req.path("images"));
+        ObjectNode env = env(req.path("env"), slot);
         if (agent.equals("bob") && (slot.isEmpty() || !schema.isBlank() || req.path("readOnly").asBoolean(false)
                 || req.path("web").asBoolean(false) || !req.path("untrusted").asText("").isBlank() || !images.isEmpty())) {
             throw new IllegalArgumentException("IBM Bob only works on a session: a slot, no schema, no one else's text, no images");
@@ -172,6 +173,7 @@ class ElfAgents {
         if (agent.equals("bob")) msg.put("agent", "bob");
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
         if (!images.isEmpty()) msg.set("images", images);
+        if (!env.isEmpty()) msg.set("env", env);
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
         if (req.path("readOnly").asBoolean(false)) msg.put("readOnly", true);
         // approved (web only): text you approved on your screen but that came from someone's words (steps written
@@ -199,6 +201,35 @@ class ElfAgents {
             }
         });
         return ElfRunner.JSON.createObjectNode().put("id", id).put("status", "queued");
+    }
+
+    static final Pattern ENV_NAME = Pattern.compile("[A-Z_][A-Z0-9_]{0,63}");
+    /** Names the sandbox sets itself, or that change how a shell, git or the agent runs: never a session's. */
+    static final Pattern ENV_TAKEN = Pattern.compile("(HOME|USER|LOGNAME|SHELL|PATH|PWD|OLDPWD|TMPDIR|TERM|LANG|IFS|ENV|BASH_ENV|"
+            + "PROMPT_COMMAND|SHELLOPTS|BASHOPTS|PS4|JAVA_HOME|XDG_.*|LD_.*|DYLD_.*|GIT_.*|GH_.*|CLAUDE_.*|BOB_.*|ELF_.*|SESSION_ENV_FILE|"
+            + "DOCKER_HOST|CONTAINER_HOST|CONTAINERS_CONF|TESTCONTAINERS_.*|DISABLE_AUTOUPDATER)");
+
+    /**
+     * A session's variables, checked (env: {NAME: value}): up to 30, for the commands its agent runs (see
+     * ElfRunner.envExtra), only on a session (a slot). Their values are never logged or kept.
+     */
+    static ObjectNode env(JsonNode given, String slot) {
+        ObjectNode out = ElfRunner.JSON.createObjectNode();
+        if (given.isMissingNode() || given.isNull()) return out;
+        if (!given.isObject() || given.size() > 30) throw new IllegalArgumentException("env is up to 30 variables, {NAME: value}");
+        if (!given.isEmpty() && slot.isEmpty()) throw new IllegalArgumentException("Only a session (a slot) is given variables (env)");
+        for (var e : given.properties()) {
+            String name = e.getKey();
+            if (!ENV_NAME.matcher(name).matches() || ENV_TAKEN.matcher(name).matches()) {
+                throw new IllegalArgumentException(name + " can't be a session's variable");
+            }
+            String value = e.getValue().isTextual() ? e.getValue().asText() : null;
+            if (value == null || value.length() > 8192 || value.chars().anyMatch(c -> c == 0 || c == '\n' || c == '\r')) {
+                throw new IllegalArgumentException(name + "'s value is text on one line, up to 8192 characters");
+            }
+            out.put(name, value);
+        }
+        return out;
     }
 
     /**
