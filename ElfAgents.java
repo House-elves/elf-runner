@@ -310,6 +310,27 @@ class ElfAgents {
         throw new IllegalArgumentException("That agent isn't running");
     }
 
+    /**
+     * What you say to one of an elf's running agents (a session's, in plain text), read at its next step: answers
+     * {said: true}, or {said: false, why} when it isn't working any more (its answer came first), to send as the next turn.
+     */
+    ObjectNode say(String elf, JsonNode req) throws IOException {
+        String id = req.path("agent").asText(""), text = req.path("text").asText("");
+        if (text.isBlank() || text.length() > 20_000) throw new IllegalArgumentException("Say something (at most 20000 characters)");
+        ObjectNode out = ElfRunner.JSON.createObjectNode();
+        for (Job j : jobs.values()) {
+            if (j.elf.equals(elf) && j.id.equals(id)) {
+                boolean working;
+                synchronized (j) {
+                    working = j.state.path("status").asText().equals("running");
+                }
+                if (working && runner.say(j.job, text)) return out.put("said", true);
+                return out.put("said", false).put("why", "It had just answered");
+            }
+        }
+        return out.put("said", false).put("why", "It isn't working any more");
+    }
+
     void started(Job j) {
         synchronized (j) {
             if (j.cancelled()) return;
