@@ -60,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.53.1"; // 0.53.1: a push GitHub refuses says why (a workflow change needs gh's workflow scope), not that the branch moved, 0.53.0: an elf's session may give its agent variables (env), for the commands it runs, not for the agent itself, 0.52.0: an elf may push its session's commits (push with slot), from that session's own clone, 0.51.0: an elf's agents.done action may answer with the next agent to start (a message queued while one worked), 0.50.0: an elf's agent may be shown PDFs with its prompt (images: application/pdf), read whole by Claude, 0.49.0: 0.49.0: an agent's answer says its model, how long it took and how full its context is, 0.48.0: 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.54.0"; // 0.54.0: an elf's tab may download a file from one of its slots (elf.slotFile, in pieces), like a video its session's agent made, 0.53.1: a push GitHub refuses says why (a workflow change needs gh's workflow scope), not that the branch moved, 0.53.0: an elf's session may give its agent variables (env), for the commands it runs, not for the agent itself, 0.52.0: an elf may push its session's commits (push with slot), from that session's own clone, 0.51.0: an elf's agents.done action may answer with the next agent to start (a message queued while one worked), 0.50.0: an elf's agent may be shown PDFs with its prompt (images: application/pdf), read whole by Claude, 0.49.0: 0.49.0: an agent's answer says its model, how long it took and how full its context is, 0.48.0: 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -248,6 +248,7 @@ public class ElfRunner {
                 case "elf.action" -> elfAction(msg);
                 case "elf.agentCancel" -> elfAgentCancel(msg);
                 case "elf.agentSlotRemove" -> elfAgentSlotRemove(msg);
+                case "elf.slotFile" -> elfSlotFile(msg);
                 case "agent.install" -> agentInstall(msg);
                 case "house.update" -> houseUpdate(msg);
                 default -> { }
@@ -1611,6 +1612,57 @@ public class ElfRunner {
             } finally {
                 lock.unlock();
             }
+        });
+    }
+
+    /** A slot's file goes to the desk in pieces of this size, and no bigger file goes at all. */
+    static final int SLOT_FILE_PIECE = 1024 * 1024;
+    static final long MAX_SLOT_FILE = 200L * 1024 * 1024;
+
+    /**
+     * A piece of a file in one of an elf's own slots, for you to download from its tab (a video a session's agent
+     * made): {repo, slot, path, offset} answers {name, size, offset, data}. The path is the file's place in the
+     * clone, or its full path there as the agent said it; only a plain file inside that clone, never through a link.
+     */
+    void elfSlotFile(JsonNode msg) {
+        elvesAnswer(msg, () -> {
+            Elves.Installed i = elves.get(msg.path("elf").asText(""));
+            String repo = msg.path("repo").asText(""), slot = msg.path("slot").asText(""), given = msg.path("path").asText("");
+            if (!REPO_NAME.matcher(repo).matches() || !ElfAgents.SLOT.matcher(slot).matches()) {
+                throw new IllegalArgumentException("A slot's file is {repo, slot, path}");
+            }
+            if (given.isBlank() || given.length() > 1000 || given.chars().anyMatch(c -> c < 0x20)) throw new IllegalArgumentException("Not a file");
+            Path wt = slotDir(repo, i.manifest().name() + "_" + slot);
+            if (!Files.isDirectory(wt, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException("That session has no clone here any more");
+            Path root = wt.toRealPath();
+            Path asked = Path.of(given);
+            Path f = (asked.isAbsolute() ? asked : wt.resolve(asked)).normalize();
+            // Its full path as the agent saw it: the clone's, or the clone's real one.
+            if (!f.startsWith(wt) && !f.startsWith(root)) throw new IllegalArgumentException("That file isn't in the session's clone");
+            Path real;
+            try {
+                real = f.toRealPath();
+            } catch (IOException e) {
+                throw new IllegalArgumentException("There's no " + f.getFileName() + " in the session's clone (any more)");
+            }
+            if (!real.startsWith(root) || !Files.isRegularFile(real, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalArgumentException("That isn't a file in the session's clone");
+            }
+            long size = Files.size(real);
+            if (size > MAX_SLOT_FILE) throw new IllegalArgumentException(f.getFileName() + " is over " + (MAX_SLOT_FILE >> 20) + " MB");
+            long offset = msg.path("offset").asLong(0);
+            if (offset < 0 || offset > size) throw new IllegalArgumentException("Not a place in the file");
+            byte[] piece = new byte[(int) Math.min(SLOT_FILE_PIECE, size - offset)];
+            try (var ch = java.nio.channels.FileChannel.open(real, java.nio.file.StandardOpenOption.READ)) {
+                java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(piece);
+                while (b.hasRemaining() && ch.read(b, offset + b.position()) > 0) {
+                    // until the piece is full
+                }
+                if (b.hasRemaining()) throw new IOException(f.getFileName() + " got shorter while it was read");
+            }
+            if (offset == 0) log(i.manifest().name() + ": " + f.getFileName() + " from slot " + slot + " on " + repo);
+            return JSON.createObjectNode().put("name", real.getFileName().toString()).put("size", size).put("offset", offset)
+                    .put("data", java.util.Base64.getEncoder().encodeToString(piece));
         });
     }
 
