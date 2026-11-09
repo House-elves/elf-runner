@@ -133,6 +133,7 @@ class ElfAgents {
         if (approved.length() > MAX_TEXT) throw new IllegalArgumentException("Too much approved text");
         ArrayNode images = images(req.path("images"));
         ObjectNode env = env(req.path("env"), slot);
+        ArrayNode attach = attach(req.path("attach"), m, slot);
         if (agent.equals("bob") && (slot.isEmpty() || !schema.isBlank() || req.path("readOnly").asBoolean(false)
                 || req.path("web").asBoolean(false) || !req.path("untrusted").asText("").isBlank() || !images.isEmpty())) {
             throw new IllegalArgumentException("IBM Bob only works on a session: a slot, no schema, no one else's text, no images");
@@ -174,6 +175,7 @@ class ElfAgents {
         if (req.path("session").isTextual() && !req.path("session").asText().isBlank()) msg.put("session", req.path("session").asText());
         if (!images.isEmpty()) msg.set("images", images);
         if (!env.isEmpty()) msg.set("env", env);
+        if (!attach.isEmpty()) msg.set("attach", attach);
         // readOnly: it only reads the checkout (Read, Grep, Glob): no shell, web or MCP, so nothing it reads can leave.
         if (req.path("readOnly").asBoolean(false)) msg.put("readOnly", true);
         // approved (web only): text you approved on your screen but that came from someone's words (steps written
@@ -213,6 +215,35 @@ class ElfAgents {
      * A session's variables, checked (env: {NAME: value}): up to 30, for the commands its agent runs (see
      * ElfRunner.envExtra), only on a session (a slot). Their values are never logged or kept.
      */
+    /** How big a file given to a session's agent (attach) may be, and how many with one message. */
+    static final long MAX_ATTACH = 50L * 1024 * 1024;
+    static final int MAX_ATTACHED = 10;
+    static final java.util.regex.Pattern ATTACH_NAME = java.util.regex.Pattern.compile("[^/\\\\\\p{Cntrl}]{1,120}");
+
+    /**
+     * Files of the elf's own a session's agent is given (a slide deck you dropped on the message): [{folder, file,
+     * name}], each a file in one of its data folders, copied into its clone's .attached/ folder as name before it starts.
+     * Only to a session (a slot), whose clone is the elf's alone.
+     */
+    static ArrayNode attach(JsonNode given, Elves.Manifest m, String slot) throws java.io.IOException {
+        ArrayNode out = ElfRunner.JSON.createArrayNode();
+        if (given.isMissingNode() || given.isNull()) return out;
+        if (!given.isArray() || given.size() > MAX_ATTACHED) throw new IllegalArgumentException("attach is up to " + MAX_ATTACHED + " files");
+        if (!given.isEmpty() && slot.isEmpty()) throw new IllegalArgumentException("Only a session (a slot) is given files (attach)");
+        for (JsonNode f : given) {
+            String folder = f.path("folder").asText(""), file = f.path("file").asText(""), name = f.path("name").asText("").strip();
+            if (!Elves.FILE.matcher(file).matches() || folder.equals("agents")) throw new IllegalArgumentException("Not a file of the elf's: " + file);
+            if (!ATTACH_NAME.matcher(name).matches() || name.startsWith(".")) throw new IllegalArgumentException("Not a file name: " + name);
+            Path dir = m.data(folder), p = dir.resolve(file);
+            if (!Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS) || !p.toRealPath().startsWith(dir.toRealPath())) {
+                throw new IllegalArgumentException("No such file: " + file);
+            }
+            if (Files.size(p) > MAX_ATTACH) throw new IllegalArgumentException(name + " is bigger than 50 MB");
+            out.addObject().put("from", p.toRealPath().toString()).put("name", name);
+        }
+        return out;
+    }
+
     static ObjectNode env(JsonNode given, String slot) {
         ObjectNode out = ElfRunner.JSON.createObjectNode();
         if (given.isMissingNode() || given.isNull()) return out;
