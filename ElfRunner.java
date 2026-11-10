@@ -60,7 +60,7 @@ public class ElfRunner {
 
     /** The release this jar was built from (v0.5.0); the release build writes it in. "dev" when run from source. */
     static final String RELEASE = "dev";
-    static final String VERSION = "0.56.1"; // 0.56.1: a session's push to a new branch may start from the default branch after its PR was merged, 0.56.0: an elf may give its session's agent files of its own (attach), copied into the clone's .attached/ folder, 0.55.0: a turn that answered more than once says the time of all its answers; you can say something to an elf's session agent while it works (an action answering {say}), which it reads at its next step, 0.54.0: an elf's tab may download a file from one of its slots (elf.slotFile, in pieces), like a video its session's agent made, 0.53.1: a push GitHub refuses says why (a workflow change needs gh's workflow scope), not that the branch moved, 0.53.0: an elf's session may give its agent variables (env), for the commands it runs, not for the agent itself, 0.52.0: an elf may push its session's commits (push with slot), from that session's own clone, 0.51.0: an elf's agents.done action may answer with the next agent to start (a message queued while one worked), 0.50.0: an elf's agent may be shown PDFs with its prompt (images: application/pdf), read whole by Claude, 0.49.0: 0.49.0: an agent's answer says its model, how long it took and how full its context is, 0.48.0: 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
+    static final String VERSION = "0.57.0"; // 0.57.0: a session's work may go to a new, empty repo of yours (push with newRepo), as one commit, and its clone moves there; a history of its own is reported (unrelated) rather than only refused, 0.56.1: a session's push to a new branch may start from the default branch after its PR was merged, 0.56.0: an elf may give its session's agent files of its own (attach), copied into the clone's .attached/ folder, 0.55.0: a turn that answered more than once says the time of all its answers; you can say something to an elf's session agent while it works (an action answering {say}), which it reads at its next step, 0.54.0: an elf's tab may download a file from one of its slots (elf.slotFile, in pieces), like a video its session's agent made, 0.53.1: a push GitHub refuses says why (a workflow change needs gh's workflow scope), not that the branch moved, 0.53.0: an elf's session may give its agent variables (env), for the commands it runs, not for the agent itself, 0.52.0: an elf may push its session's commits (push with slot), from that session's own clone, 0.51.0: an elf's agents.done action may answer with the next agent to start (a message queued while one worked), 0.50.0: an elf's agent may be shown PDFs with its prompt (images: application/pdf), read whole by Claude, 0.49.0: 0.49.0: an agent's answer says its model, how long it took and how full its context is, 0.48.0: 0.48.0: the desk can install a coding agent you confirm (agent.install: its npm package, into ~/.local), 0.47.1: 0.47.1: IBM Bob's .bob/settings is never written through a link, and the sandbox shows only the node binary and a checked @ibm/bob package, 0.47.0: 0.47.0: an elf's session may use IBM Bob (agent: bob), in the sandbox, checked once per version, 0.46.1: 0.46.1: slots have a folder of their own (worktrees/slots), so none can take an item's or a web agent's name, 0.46.0: 0.46.0: an elf's agent may keep a clone of its own between turns (checkout slot), answer in plain text (no schema) and be given its session's goal each turn; elf.agentSlotRemove, 0.45.4: a web agent's task may hold steps only you can do (fix, change, sign in): what's flagged is a way to do them anyway, 0.45.3: the safety check reads all of a long text, in overlapping pieces (it read only its first 60,000 characters), 0.45.2: a web agent's approved text (steps from an email) is put in its prompt by the runner and screened as someone's words too, 0.45.1: a web agent's task is screened for reaching beyond it, not for instructing it, 0.45.0: an elf's agent may read only the web, with no repo (checkout kind WEB), 0.44.0: elves may also ask IBM Bob (its API key in the runner's settings), and only an agent that passed the lock-down check at its version, 0.43.0: elves ask the coding agent you choose (Claude Code, Codex or pi) through ELF_ASK, locked down, 0.42.0: an elf's agent may be shown images (screenshots you pasted), and an action knows the runner's version (ELF_RUNNER_VERSION), 0.41.0: elves start without jbang, with an AOT cache of their classes, 0.40.0: an update shows what is new, from the elf's CHANGES.md, 0.39.1: a repo's work is pushed onto the default branch as the agent started from it, also when someone committed since the last push, 0.39.0: elves may also come from the accounts and repos in ELF_SOURCES, 0.38.0: 0.38.0: a read-only agent on a public repo may also read the web (web), 0.37.1: 0.37.1: --check-elf <folder> checks an elf the way installing it does, 0.37.0: an elf's agent may work on a repo (checkout kind REPO), not only a PR or issue, and only read (readOnly), 0.36.0: an elf's tab may draw its own settings (tab.settings), 0.35.0: house.update updates Elf Desk and the runner, 0.34.0: an elf has a version and an author, and the runner says its release, 0.33.0: elves can start agents (agents: true), and push or squash their commits, 0.32.2: an installed elf whose config was deleted gets it back, with its defaults, 0.32.1: the safety check asks again when it gets no verdict, 0.32.0: an elf has a title, one tab and a refresh you can schedule, and refreshes once when set up, 0.31.0: elves draw their own tabs (tabs, actions and data in elf.yaml), the built-in tabs' messages are gone, 0.30.2: an elf.yaml can't drop a remembered secret or what it goes with, 0.30.1: the runner itself allows only House-elves' and your own elves, and secrets stay secret across updates, 0.30.0: elves installed from their repos (elf.yaml), schedules run by the runner, 0.29.4: the desk edits the runner settings in house-elves runner.config, 0.29.3: the agent knows its time limit, and a timeout says so, 0.29.2: messages over 200 KB go in parts, 0.29.1: files go in 64 KB chunks, 0.29.0: files from the agent ($ELF_FILES) reach the desk, 0.28.1: secrets stay with their account and server, 0.28.0: the elves' settings, 0.27.0: approve CI held at a deployment environment, 0.26.0: quarterly reviews, 0.25.0: send the weekly status to the team, 0.24.0: weekly-status drafts and send, 0.23.0: mark a Zulip topic read, 0.22.0: mark an email thread read, 0.21.0: PRs may open ready for review, 0.20.0: a private Claude config view per run, 0.19.0: a sandbox sees only its own item, 0.18.0: a clone per item, objects from a read-only cache, 0.17.0: reset what the sandbox could change in git before using it, 0.16.0: drafts carry their diff, 0.15.0: PRs open as drafts, ready for review, 0.14.0: open a PR from your fork, 0.13.0: email triage run replaces the briefing, 0.12.0: daily-triage runs, 0.11.0: open issues, 0.10.0: assign yourself, 0.9.0: squash to one commit, 0.2.0: github.write, 0.3.0: merge, 0.4.0: CI re-run, commits, git.push, 0.5.0: approve runs, 0.6.0: update branch, 0.7.0: reopen, 0.8.0: mvnpm checks
     static final ObjectMapper JSON = new ObjectMapper();
     static final boolean MAC = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("mac");
 
@@ -2465,6 +2465,9 @@ public class ElfRunner {
         try {
             String head = gitOut(wt, "rev-parse", "HEAD");
             String base = gitOut(wt, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replaceFirst("^origin/", "");
+            // A history of its own (the agent started a new project): no branch of the repo can take it, but a new,
+            // empty repo can (push with newRepo).
+            if (!gitQuiet(wt, "merge-base", head, "refs/remotes/origin/HEAD")) return unrelated(wt, head, base);
             String mb = gitOut(wt, "merge-base", head, "refs/remotes/origin/HEAD");
             List<String> own = lines(gitOut(wt, "rev-list", "--reverse", head, "^" + mb));
             if (own.size() > 1) {
@@ -2479,6 +2482,28 @@ public class ElfRunner {
             log("Couldn't read the issue worktree's commits: " + rootMessage(e));
             return JSON.createObjectNode().put("error", "Couldn't read the agent's commits: " + rootMessage(e));
         }
+    }
+
+    /**
+     * HEAD with no history in common with the repo's default branch: {error (as before 0.57.0, naming merge-base),
+     * unrelated, to, base, commits (newest 200, oldest first), count, files, diffstat}, for a push to a new repo.
+     */
+    ObjectNode unrelated(Path wt, String head, String base) throws Exception {
+        ObjectNode git = JSON.createObjectNode().put("error", "Couldn't read the agent's commits: its history shares no merge-base with "
+                + base).put("unrelated", true).put("to", head).put("base", base);
+        List<String> log = lines(gitOut(wt, "log", "--first-parent", "-n", "200", "--format=%H%x09%s", head));
+        java.util.Collections.reverse(log);
+        var commits = git.putArray("commits");
+        for (String line : log) {
+            int tab = line.indexOf('\t');
+            if (tab > 0) commits.addObject().put("sha", line.substring(0, tab)).put("subject", line.substring(tab + 1));
+        }
+        git.put("count", Integer.parseInt(gitOut(wt, "rev-list", "--count", head)));
+        List<String> files = lines(gitOut(wt, "ls-tree", "-r", "--name-only", head));
+        git.put("files", files.size());
+        String stat = String.join("\n", files.subList(0, Math.min(40, files.size())));
+        git.put("diffstat", files.size() > 40 ? stat + "\n ... and " + (files.size() - 40) + " more files" : stat);
+        return git;
     }
 
     /** "Squash into one commit" without an agent: resets the PR's worktree to its head and squashes it. */
@@ -2766,6 +2791,11 @@ public class ElfRunner {
             if (!gitOut(wt, "rev-parse", "HEAD").equals(to)) {
                 throw new IllegalStateException("The worktree moved on since the agent finished; ask it again");
             }
+            // A session's work to a new, empty repo of yours (0.57.0); the session's clone then moves there.
+            if (msg.path("newRepo").asBoolean()) {
+                if (slot.isEmpty() || headRepo.equalsIgnoreCase(repo)) throw new IllegalArgumentException("Refused a push with unexpected parameters");
+                return pushNew(msg, wt, headRepo, headRef, to, token, as, as + "_" + slot);
+            }
             boolean squash = msg.path("squash").asBoolean();
             if (squash) {
                 // One commit, on top of the base branch: replaces the branch, but only if it's still at `from`.
@@ -2829,6 +2859,105 @@ public class ElfRunner {
             if (pushLock != null) pushLock.unlock();
         }
         return result;
+    }
+
+    /**
+     * A session's work to a new repo: only one that's empty on GitHub, so nothing there is overwritten. With squash,
+     * as one commit with no parent (HEAD's files, its author, the message given or HEAD's), so none of the session's
+     * repo's history goes with it. Pushed, the session's clone moves to the new repo (moveSlot): its next turns and
+     * pushes are there. {status: 200, pushed, moved} or {status, error}.
+     */
+    ObjectNode pushNew(JsonNode msg, Path wt, String headRepo, String headRef, String to, String token, String as, String slot) throws Exception {
+        ObjectNode result = JSON.createObjectNode();
+        String url = "https://github.com/" + headRepo + ".git";
+        if (Files.exists(slotDir(headRepo, slot), LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("Refused: this session has a clone of " + headRepo + " already");
+        }
+        String[] there = gitToken(wt, token, "ls-remote", url);
+        if (!there[0].equals("0")) throw new IllegalStateException("Couldn't reach " + headRepo + " as " + as + ": " + clip(there[1].strip(), 300));
+        if (!there[1].isBlank()) throw new IllegalStateException("Refused: " + headRepo + " isn't empty, so nothing was pushed");
+        String sha = to;
+        if (msg.path("squash").asBoolean()) {
+            String message = msg.path("message").asText("").strip();
+            if (message.isEmpty() || message.length() > 5000) message = gitOut(wt, "log", "-1", "--format=%B", to);
+            List<String> who = lines(gitOut(wt, "log", "-1", "--format=%an%n%ae%n%aI", to));
+            sha = gitIn(wt, message, Map.of("GIT_AUTHOR_NAME", who.get(0), "GIT_AUTHOR_EMAIL", who.get(1), "GIT_AUTHOR_DATE", who.get(2),
+                    "GIT_COMMITTER_NAME", who.get(0), "GIT_COMMITTER_EMAIL", who.get(1)), "commit-tree", to + "^{tree}", "-F", "-");
+            if (!SHA.matcher(sha).matches()) throw new IOException("Couldn't make the one commit");
+        }
+        String[] out = gitToken(wt, token, "push", url, sha + ":refs/heads/" + headRef);
+        if (!out[0].equals("0")) {
+            String why = out[1].contains("workflow") && out[1].contains("scope")
+                    ? "GitHub refused it: it adds GitHub Actions workflows (.github/workflows), which your gh login isn't allowed to. "
+                            + "Run gh auth refresh -h github.com -s workflow, then push again"
+                    : out[1].contains("remote rejected") ? "GitHub refused it: " + clip(out[1].substring(out[1].indexOf("remote rejected")).strip(), 300)
+                    : clip(out[1].strip(), 300);
+            log("Push to the new repo " + headRepo + " refused: " + clip(out[1].strip(), 300));
+            return result.put("status", 409).put("error", why);
+        }
+        log("Pushed " + sha.substring(0, 7) + " to the new repo " + headRepo + ":" + headRef + " as " + as);
+        result.put("status", 200).put("body", "{}").put("pushed", sha);
+        try {
+            moveSlot(wt, headRepo, slot, to, sha);
+            result.put("moved", headRepo);
+        } catch (Exception e) {
+            log("Couldn't move the session's clone to " + headRepo + ": " + rootMessage(e));
+            result.put("notMoved", "Pushed, but its clone couldn't move to " + headRepo + ": " + rootMessage(e));
+        }
+        return result;
+    }
+
+    /**
+     * A session's clone, to the new repo it was pushed to: every object it uses kept in its own git dir first (they
+     * came from the old repo's cache), then it borrows from the new repo's cache, with origin there, at the commit
+     * pushed (the same files as before: a squash leaves the work tree as it is).
+     */
+    void moveSlot(Path wt, String headRepo, String slot, String to, String sha) throws Exception {
+        Path cache = cache(0, headRepo, 0);
+        git(wt, "repack", "-a", "-d", "-q");
+        Path dest = slotDir(headRepo, slot);
+        Files.createDirectories(dest.getParent());
+        Files.move(wt, dest);
+        // What the agent keeps by the clone's path (its conversation, its state, Bob's home) goes with it.
+        String was = wt.toString().replaceAll("[^A-Za-z0-9]", "-"), now = dest.toString().replaceAll("[^A-Za-z0-9]", "-");
+        moveIfThere(cfg.claudeConfigDir.resolve("projects").resolve(was), cfg.claudeConfigDir.resolve("projects").resolve(now));
+        moveIfThere(cfg.workDir.resolve("claude-state").resolve(was + ".claude.json"), cfg.workDir.resolve("claude-state").resolve(now + ".claude.json"));
+        moveIfThere(cfg.workDir.resolve("bob-homes").resolve(java.util.HexFormat.of().formatHex(sha256(wt.toString()), 0, 12)),
+                cfg.workDir.resolve("bob-homes").resolve(java.util.HexFormat.of().formatHex(sha256(dest.toString()), 0, 12)));
+        try (var left = Files.list(wt.getParent())) {
+            if (left.findAny().isEmpty()) Files.delete(wt.getParent());
+        } catch (IOException e) {
+            // another slot of the old repo: keep it
+        }
+        sanitizeItem(headRepo, dest);
+        fetchFromCache(dest, cache, 0);
+        if (!sha.equals(to)) git(dest, "reset", "-q", "--soft", sha);
+        replace(headFile(dest), sha);
+        Files.deleteIfExists(headFile(wt));
+    }
+
+    static void moveIfThere(Path from, Path to) throws IOException {
+        if (!Files.exists(from, LinkOption.NOFOLLOW_LINKS) || Files.exists(to, LinkOption.NOFOLLOW_LINKS)) return;
+        Files.createDirectories(to.getParent());
+        Files.move(from, to);
+    }
+
+    /** git with a token lent through a credential helper for this command: {exit code, output}. */
+    String[] gitToken(Path dir, String token, String... args) throws Exception {
+        List<String> cmd = new ArrayList<>(List.of("git", "-c", "credential.helper=",
+                "-c", "credential.helper=!f() { echo username=x-access-token; echo \"password=$ELF_PUSH_TOKEN\"; }; f"));
+        cmd.addAll(List.of(args));
+        ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
+        scrub(pb.environment());
+        pb.environment().put("ELF_PUSH_TOKEN", token);
+        pb.environment().put("GIT_TERMINAL_PROMPT", "0");
+        Process p = pb.start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!p.waitFor(5, TimeUnit.MINUTES)) {
+            kill(p);
+            throw new IOException("git " + args[0] + " timed out");
+        }
+        return new String[] {String.valueOf(p.exitValue()), out};
     }
 
     String gitOut(Path dir, String... args) throws Exception {
