@@ -10,7 +10,23 @@ if [ ! -f "$APP/elf-runner.jar" ]; then
   exit 1
 fi
 
-if [ "${1:-}" != "--force" ] && [ "$(pgrep -x bwrap; pgrep -x sandbox-exec)" != "" ]; then
+# An agent is a sandbox (bwrap, sandbox-exec) under the runner. Any bwrap on the machine won't do: Flatpak apps
+# (Slack, Zulip, ...) run in one too.
+agent_running() {
+  local todo kids pid
+  todo="$(pgrep -f -- "-jar $APP/elf-runner.jar" || true)"
+  while [ -n "$todo" ]; do
+    kids=""
+    for pid in $todo; do
+      case "$(ps -o comm= -p "$pid" 2>/dev/null)" in bwrap|sandbox-exec) return 0 ;; esac
+      kids="$kids $(pgrep -P "$pid" || true)"
+    done
+    todo="$(echo $kids)"
+  done
+  return 1
+}
+
+if [ "${1:-}" != "--force" ] && agent_running; then
   echo "An agent is running; deploy when it's done, or use --force to stop it." >&2
   exit 1
 fi
